@@ -8,6 +8,19 @@ A generic, graph-based workflow engine with a drag-and-drop React editor. Zero d
 npm install vise-workflow-engine
 ```
 
+## Live Demo
+
+Try the editor in your browser — no backend required:
+
+```bash
+git clone https://github.com/andreavisentin/workflow-engine.git
+cd workflow-engine/demo
+npm install
+npm run dev
+```
+
+The demo uses an in-memory mock API (localStorage) so you can drag, drop, save, and load workflows without setting up a database.
+
 ## What's included
 
 | Module | Import | Description |
