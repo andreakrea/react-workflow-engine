@@ -5,7 +5,7 @@ import 'vise-workflow-engine/frontend/style.css';
 import { blockTypes, hookTypes } from './blocks';
 import WorkflowSimulator from './WorkflowSimulator';
 
-const DEMO_LICENSE_KEY = 'eyJvcmciOiJEZW1vIiwicGxhbiI6ImRlbW8ifQ==.852446cb8982b6da';
+const DEMO_LICENSE_KEY = 'eyJvcmciOiJEZW1vIiwicGxhbiI6InBybyJ9.c61270d419656170';
 
 export default function App() {
   const [tab, setTab] = useState<'editor' | 'simulator'>('editor');
