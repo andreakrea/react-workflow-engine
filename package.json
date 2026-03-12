@@ -1,0 +1,58 @@
+{
+  "name": "vise-workflow-engine",
+  "version": "1.0.0",
+  "description": "Generic graph-based workflow engine with drag-and-drop React editor — state machine, Express router, and ReactFlow UI in one package",
+  "exports": {
+    ".": "./backend/index.js",
+    "./frontend": {
+      "import": "./frontend/dist/index.mjs",
+      "require": "./frontend/dist/index.cjs",
+      "types": "./frontend/dist/index.d.ts"
+    },
+    "./frontend/style.css": "./frontend/dist/style.css",
+    "./migrations": "./backend/migrations"
+  },
+  "main": "./backend/index.js",
+  "files": [
+    "backend/index.js",
+    "backend/WorkflowEngine.js",
+    "backend/WorkflowHooksDispatcher.js",
+    "backend/router.js",
+    "backend/migrations",
+    "backend/knexfile.example.js",
+    "frontend/dist"
+  ],
+  "keywords": [
+    "workflow",
+    "state-machine",
+    "graph",
+    "editor",
+    "reactflow",
+    "express",
+    "knex",
+    "postgresql",
+    "drag-and-drop",
+    "react"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "express": ">=4.0.0",
+    "knex": ">=2.0.0",
+    "pg": ">=8.0.0",
+    "react": ">=18.0.0",
+    "react-dom": ">=18.0.0",
+    "reactflow": ">=11.0.0"
+  },
+  "peerDependenciesMeta": {
+    "express": { "optional": true },
+    "knex": { "optional": true },
+    "pg": { "optional": true },
+    "react": { "optional": true },
+    "react-dom": { "optional": true },
+    "reactflow": { "optional": true }
+  },
+  "scripts": {
+    "build": "cd frontend && npm run build",
+    "prepublishOnly": "npm run build"
+  }
+}

@@ -3,6 +3,27 @@
   "version": "1.0.0",
   "description": "Generic graph-based workflow engine — drop-in Node.js/Express/PostgreSQL package",
   "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./migrations": "./migrations"
+  },
+  "files": [
+    "index.js",
+    "WorkflowEngine.js",
+    "WorkflowHooksDispatcher.js",
+    "router.js",
+    "migrations",
+    "knexfile.example.js"
+  ],
+  "keywords": [
+    "workflow",
+    "state-machine",
+    "graph",
+    "express",
+    "knex",
+    "postgresql"
+  ],
+  "license": "MIT",
   "peerDependencies": {
     "express": ">=4.0.0",
     "knex": ">=2.0.0",

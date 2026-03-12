@@ -2,8 +2,29 @@
   "name": "@workflow-engine/frontend",
   "version": "1.0.0",
   "description": "Generic drag-and-drop ReactFlow workflow editor component",
-  "main": "src/index.ts",
-  "types": "src/index.ts",
+  "type": "module",
+  "main": "dist/index.cjs",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs",
+      "types": "./dist/index.d.ts"
+    },
+    "./style.css": "./dist/style.css"
+  },
+  "files": [
+    "dist"
+  ],
+  "keywords": [
+    "workflow",
+    "editor",
+    "reactflow",
+    "drag-and-drop",
+    "react"
+  ],
+  "license": "MIT",
   "peerDependencies": {
     "react": ">=18.0.0",
     "react-dom": ">=18.0.0",
@@ -11,7 +32,13 @@
   },
   "devDependencies": {
     "@types/react": "^18.3.0",
+    "@vitejs/plugin-react": "^4.2.0",
     "reactflow": "^11.11.4",
-    "typescript": "^5.4.0"
+    "typescript": "^5.4.0",
+    "vite": "^5.4.0",
+    "vite-plugin-dts": "^3.9.0"
+  },
+  "scripts": {
+    "build": "vite build && tsc --emitDeclarationOnly"
   }
 }
