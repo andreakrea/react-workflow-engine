@@ -1,0 +1,17 @@
+{
+  "name": "@workflow-engine/frontend",
+  "version": "1.0.0",
+  "description": "Generic drag-and-drop ReactFlow workflow editor component",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "peerDependencies": {
+    "react": ">=18.0.0",
+    "react-dom": ">=18.0.0",
+    "reactflow": ">=11.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.0",
+    "reactflow": "^11.11.4",
+    "typescript": "^5.4.0"
+  }
+}
