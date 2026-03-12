@@ -64,7 +64,7 @@ export interface WorkflowEditorProps {
 
   /**
    * License key for vise-workflow-engine.
-   * Get one at https://github.com/andreakrea/workflow-engine
+   * Get one at https://github.com/andreakrea/react-workflow-engine
    */
   licenseKey?: string;
 }
