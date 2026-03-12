@@ -68,7 +68,7 @@ function _requireLicense(caller) {
   if (!_validatedLicense) {
     throw new Error(
       `vise-workflow-engine: License key required. Call validateLicense(key) before using ${caller}.\n` +
-      `Get a key at: https://github.com/andreavisentin/workflow-engine`
+      `Get a key at: https://github.com/andreakrea/workflow-engine`
     );
   }
 }
