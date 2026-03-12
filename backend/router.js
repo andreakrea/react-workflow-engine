@@ -41,6 +41,9 @@ function parseWorkflow(row) {
 }
 
 function createWorkflowRouter({ knex, authMiddleware } = {}) {
+  const { _requireLicense } = require('./license');
+  _requireLicense('createWorkflowRouter');
+
   if (!knex) throw new Error('createWorkflowRouter: knex is required');
 
   const router = express.Router();

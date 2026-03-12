@@ -96,6 +96,9 @@ class WorkflowEngine {
     onCancelTracking,
     onLogHookExecution,
   } = {}) {
+    const { _requireLicense } = require('./license');
+    _requireLicense('WorkflowEngine');
+
     if (!knex) throw new Error('WorkflowEngine: knex is required');
     if (!subjectRepo) throw new Error('WorkflowEngine: subjectRepo is required');
 

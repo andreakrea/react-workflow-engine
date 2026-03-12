@@ -10,7 +10,9 @@ npm install vise-workflow-engine
 
 ## Live Demo
 
-Try the editor in your browser — no backend required:
+**[▶ Open in StackBlitz](https://stackblitz.com/github/andreavisentin/workflow-engine/tree/main/demo)** — try the editor in your browser, no install needed.
+
+Or run locally:
 
 ```bash
 git clone https://github.com/andreavisentin/workflow-engine.git
@@ -20,6 +22,35 @@ npm run dev
 ```
 
 The demo uses an in-memory mock API (localStorage) so you can drag, drop, save, and load workflows without setting up a database.
+
+## License Key
+
+A license key is required to use this package. Contact [andreavisentin](https://github.com/andreavisentin) to get one.
+
+**Backend — activate before using any module:**
+
+```js
+const { validateLicense, WorkflowEngine, createWorkflowRouter } = require('vise-workflow-engine');
+
+const result = validateLicense(process.env.WORKFLOW_ENGINE_KEY);
+if (!result.valid) throw new Error(result.error);
+
+// Now you can use the engine and router
+const engine = new WorkflowEngine({ knex, subjectRepo });
+```
+
+**Frontend — pass the key as a prop:**
+
+```tsx
+<WorkflowEditor
+  licenseKey={process.env.REACT_APP_WORKFLOW_ENGINE_KEY}
+  apiUrl="http://localhost:3000"
+  blockTypes={blockTypes}
+  hookTypes={hookTypes}
+/>
+```
+
+Without a valid key, `WorkflowEngine` and `createWorkflowRouter` will throw, and `WorkflowEditor` will show a lock screen.
 
 ## What's included
 

@@ -61,4 +61,10 @@ export interface WorkflowEditorProps {
    * Title shown in the editor header. Defaults to "Workflow Editor".
    */
   title?: string;
+
+  /**
+   * License key for vise-workflow-engine.
+   * Get one at https://github.com/andreavisentin/workflow-engine
+   */
+  licenseKey?: string;
 }

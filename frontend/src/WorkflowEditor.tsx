@@ -17,6 +17,7 @@ import ReactFlow, {
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import type { WorkflowEditorProps, BlockType } from './types';
+import { validateLicenseKey } from './license';
 
 // ─── Custom ReactFlow node components ────────────────────────────────────────
 
@@ -585,6 +586,38 @@ function WorkflowCanvas({ apiUrl, blockTypes, hookTypes, onBack, title }: Canvas
 // ─── Public export (wrapped in ReactFlowProvider) ─────────────────────────────
 
 export default function WorkflowEditor(props: WorkflowEditorProps) {
+  const [licenseOk, setLicenseOk] = useState(false);
+  const [licenseError, setLicenseError] = useState<string | null>(null);
+
+  useEffect(() => {
+    validateLicenseKey(props.licenseKey).then((result) => {
+      if (result.valid) {
+        setLicenseOk(true);
+      } else {
+        setLicenseError(result.error || 'Invalid license key');
+      }
+    });
+  }, [props.licenseKey]);
+
+  if (licenseError) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontFamily: 'system-ui' }}>
+        <div style={{ textAlign: 'center', padding: '2rem' }}>
+          <p style={{ fontSize: '2rem', marginBottom: '1rem' }}>🔒</p>
+          <p style={{ fontWeight: 600, fontSize: '1.1rem', marginBottom: '0.5rem' }}>
+            vise-workflow-engine
+          </p>
+          <p style={{ color: '#666' }}>{licenseError}</p>
+          <p style={{ color: '#999', fontSize: '0.85rem', marginTop: '1rem' }}>
+            Pass a valid <code>licenseKey</code> prop to WorkflowEditor
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!licenseOk) return null;
+
   return (
     <ReactFlowProvider>
       <WorkflowCanvas {...props} />
