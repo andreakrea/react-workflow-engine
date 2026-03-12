@@ -10,13 +10,13 @@ npm install vise-workflow-engine
 
 ## Live Demo
 
-**[▶ Open in StackBlitz](https://stackblitz.com/github/andreakrea/react-workflow-engine/tree/main/demo)** — try the editor in your browser, no install needed.
+**[▶ Try the live demo](https://andreakrea.github.io/react-workflow-engine/)** — no install needed.
 
 Or run locally:
 
 ```bash
 git clone https://github.com/andreakrea/react-workflow-engine.git
-cd workflow-engine/demo
+cd react-workflow-engine/demo
 npm install
 npm run dev
 ```
