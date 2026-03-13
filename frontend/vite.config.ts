@@ -18,6 +18,7 @@ export default defineConfig({
           'react-dom': 'ReactDOM',
           reactflow: 'ReactFlow',
         },
+        assetFileNames: '[name][extname]',
       },
     },
     cssCodeSplit: false,
