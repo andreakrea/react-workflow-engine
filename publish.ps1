@@ -68,8 +68,16 @@ if ($confirm -ne 'y') {
 
 # 7. Publish
 Write-Host "`n[4/5] Publishing to npm..." -ForegroundColor Yellow
-npm publish --access public
-if ($LASTEXITCODE -ne 0) {
+$otp = Read-Host "Enter npm OTP code (leave blank if using automation token)"
+$ErrorActionPreference = 'Continue'
+if ($otp) {
+    npm publish --access public --otp $otp 2>&1 | Write-Host
+} else {
+    npm publish --access public 2>&1 | Write-Host
+}
+$publishExit = $LASTEXITCODE
+$ErrorActionPreference = 'Stop'
+if ($publishExit -ne 0) {
     Write-Host "ERROR: Publish failed. Reverting version bump..." -ForegroundColor Red
     git checkout package.json package-lock.json 2>$null
     exit 1
@@ -78,9 +86,9 @@ Write-Host "  Published vise-workflow-engine@$version" -ForegroundColor Green
 
 # 8. Git commit & tag
 Write-Host "`n[5/5] Committing and tagging..." -ForegroundColor Yellow
-git add package.json package-lock.json
-git commit -m "release: v$version"
-git tag "v$version"
+git add package.json package-lock.json 2>&1 | Out-Null
+git commit -m "release: v$version" 2>&1 | Out-Null
+git tag "v$version" 2>&1 | Out-Null
 Write-Host "  Tagged v$version - push with: git push; git push --tags" -ForegroundColor Green
 
 Write-Host "`nDone!" -ForegroundColor Cyan
