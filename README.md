@@ -339,6 +339,10 @@ function App() {
 }
 ```
 
+### Built-in workflow management
+
+The editor header includes buttons to **load**, **save**, **clear**, and **create** workflows. The workflow list dropdown also lets you **rename** or **delete** any saved workflow — hover over a workflow to reveal the action icons.
+
 ### WorkflowEditorProps
 
 | Prop | Type | Required | Description |
@@ -348,6 +352,7 @@ function App() {
 | `hookTypes` | `BlockType[]` | Yes | Lifecycle hook blocks for the palette |
 | `title` | `string` | No | Editor header title (default: `"Workflow Editor"`) |
 | `onBack` | `() => void` | No | Back button callback (hidden if omitted) |
+| `licenseKey` | `string` | No | License key — without a valid key the editor shows a lock screen |
 
 ### BlockType
 
