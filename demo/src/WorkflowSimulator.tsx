@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react';
 
 interface WorkflowNode {
   id: string;
-  data: { label: string; type: string; className?: string };
+  data: { label: string; type: string; className?: string; variables?: Record<string, any> };
   position: { x: number; y: number };
 }
 
@@ -144,6 +144,11 @@ export default function WorkflowSimulator() {
     setNextTicketId((n) => n + 1);
     addLog('info', `📋 ${ticket.label} created → enters "${initial.data?.label}"`);
     addLog('action', `⚡ Action "${initial.data?.type}" executed for ${ticket.label}`);
+    const initVars = initial.data?.variables;
+    if (initVars && Object.keys(initVars).length > 0) {
+      const varStr = Object.entries(initVars).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(', ');
+      addLog('info', `📋 Variables for ${ticket.label}: ${varStr}`);
+    }
     fireHooks(selectedWorkflow, 'on_node_entry', initial.id, ticket.label);
   };
 
@@ -177,6 +182,13 @@ export default function WorkflowSimulator() {
 
         // Execute action
         addLog('action', `⚡ Action "${targetNode.data?.type}" executed for ${t.label}`);
+
+        // Log configured variables if present
+        const vars = targetNode.data?.variables;
+        if (vars && Object.keys(vars).length > 0) {
+          const varStr = Object.entries(vars).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(', ');
+          addLog('info', `📋 Variables for ${t.label}: ${varStr}`);
+        }
 
         // Check if terminal
         const nextStates = getNextStates(selectedWorkflow, targetNodeId);
@@ -302,6 +314,20 @@ export default function WorkflowSimulator() {
                     >
                       {currentNode?.data?.label || ticket.currentNodeType || '—'}
                     </div>
+                    {/* Show configured variables for current node */}
+                    {currentNode?.data?.variables && Object.keys(currentNode.data.variables).length > 0 && (
+                      <div className="mt-2 px-3 py-2 bg-slate-50 rounded-lg border border-slate-200">
+                        <span className="text-xs font-medium text-slate-500">⚙ Variables:</span>
+                        <div className="mt-1 space-y-0.5">
+                          {Object.entries(currentNode.data.variables).map(([key, val]) => (
+                            <div key={key} className="text-xs text-slate-600">
+                              <span className="font-medium">{key}:</span>{' '}
+                              <span className="text-slate-800">{String(val)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* Available transitions */}

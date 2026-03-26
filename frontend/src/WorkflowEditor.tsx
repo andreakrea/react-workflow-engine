@@ -16,12 +16,13 @@ import ReactFlow, {
   type NodeProps,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
-import type { WorkflowEditorProps, BlockType } from './types';
+import type { WorkflowEditorProps, BlockType, VariableDefinition } from './types';
 import { validateLicenseKey } from './license';
 
 // ─── Custom ReactFlow node components ────────────────────────────────────────
 
 function DecisionNode({ data }: NodeProps) {
+  const hasVars = data.variables && Object.keys(data.variables).some(k => data.variables[k] !== '' && data.variables[k] !== 0 && data.variables[k] !== false);
   return (
     <div className={`${data.className} relative min-w-[180px]`}>
       <Handle
@@ -31,6 +32,9 @@ function DecisionNode({ data }: NodeProps) {
         className="w-3 h-3 !bg-slate-400 border-2 border-white"
       />
       <div className="px-4 py-3 text-center">{data.label}</div>
+      {hasVars && (
+        <div className="absolute top-1 right-1 w-4 h-4 text-xs text-slate-500" title="Has configured variables">⚙</div>
+      )}
       <Handle
         type="source"
         position={Position.Bottom}
@@ -56,6 +60,7 @@ function DecisionNode({ data }: NodeProps) {
 }
 
 function StandardNode({ data }: NodeProps) {
+  const hasVars = data.variables && Object.keys(data.variables).some(k => data.variables[k] !== '' && data.variables[k] !== 0 && data.variables[k] !== false);
   return (
     <div className={`${data.className} relative min-w-[180px]`}>
       <Handle
@@ -64,6 +69,9 @@ function StandardNode({ data }: NodeProps) {
         className="w-3 h-3 !bg-slate-400 border-2 border-white"
       />
       <div className="px-4 py-3 text-center">{data.label}</div>
+      {hasVars && (
+        <div className="absolute top-1 right-1 w-4 h-4 text-xs text-slate-500" title="Has configured variables">⚙</div>
+      )}
       <Handle
         type="source"
         position={Position.Bottom}
@@ -74,6 +82,7 @@ function StandardNode({ data }: NodeProps) {
 }
 
 function TerminalNode({ data }: NodeProps) {
+  const hasVars = data.variables && Object.keys(data.variables).some(k => data.variables[k] !== '' && data.variables[k] !== 0 && data.variables[k] !== false);
   return (
     <div className={`${data.className} relative min-w-[180px]`}>
       <Handle
@@ -82,6 +91,9 @@ function TerminalNode({ data }: NodeProps) {
         className="w-3 h-3 !bg-slate-400 border-2 border-white"
       />
       <div className="px-4 py-3 text-center">{data.label}</div>
+      {hasVars && (
+        <div className="absolute top-1 right-1 w-4 h-4 text-xs text-slate-500" title="Has configured variables">⚙</div>
+      )}
     </div>
   );
 }
@@ -133,6 +145,24 @@ function getNextNodeId(existingNodes: Node[]): number {
   return ids.length === 0 ? 1 : Math.max(...ids) + 1;
 }
 
+function getDefaultVariableValues(variables?: VariableDefinition[]): Record<string, any> {
+  if (!variables?.length) return {};
+  const vals: Record<string, any> = {};
+  for (const v of variables) {
+    if (v.default !== undefined) {
+      vals[v.name] = v.default;
+    } else {
+      switch (v.type) {
+        case 'boolean': vals[v.name] = false; break;
+        case 'number': vals[v.name] = 0; break;
+        case 'select': vals[v.name] = v.options?.[0] ?? ''; break;
+        default: vals[v.name] = '';
+      }
+    }
+  }
+  return vals;
+}
+
 // ─── Canvas (inner component, receives all props) ─────────────────────────────
 
 interface CanvasProps extends WorkflowEditorProps {}
@@ -145,6 +175,7 @@ function WorkflowCanvas({ apiUrl, blockTypes, hookTypes, onBack, title }: Canvas
   const [savedWorkflows, setSavedWorkflows] = useState<any[]>([]);
   const [showWorkflowList, setShowWorkflowList] = useState(false);
   const [currentWorkflowId, setCurrentWorkflowId] = useState<number | null>(null);
+  const [selectedNode, setSelectedNode] = useState<Node | null>(null);
 
   // nodeId counter — module-level is not safe in an exported component, so use a ref
   const nodeIdRef = useRef(1);
@@ -363,6 +394,8 @@ function WorkflowCanvas({ apiUrl, blockTypes, hookTypes, onBack, title }: Canvas
         };
         setNodes(nds => [...nds, newNode]);
       } else {
+        const blockDef = blockTypes.find(b => b.id === blockData.id);
+        const variables = getDefaultVariableValues(blockDef?.variables);
         const newNode: Node = {
           id: `node_${nodeIdRef.current++}`,
           type: blockData.nodeType || 'standard',
@@ -371,6 +404,7 @@ function WorkflowCanvas({ apiUrl, blockTypes, hookTypes, onBack, title }: Canvas
             label: `${blockData.icon} ${blockData.label}`,
             type: blockData.id,
             className: `${blockData.color} border-2 rounded-lg shadow-md`,
+            variables,
           },
         };
         setNodes(nds => [...nds, newNode]);
@@ -384,6 +418,43 @@ function WorkflowCanvas({ apiUrl, blockTypes, hookTypes, onBack, title }: Canvas
     e.dataTransfer.setData('application/blockdata', JSON.stringify(block));
     e.dataTransfer.effectAllowed = 'move';
   };
+
+  const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
+    if (node.id.startsWith('hook_')) {
+      setSelectedNode(null);
+      return;
+    }
+    setSelectedNode(node);
+  }, []);
+
+  const onPaneClick = useCallback(() => {
+    setSelectedNode(null);
+  }, []);
+
+  const updateNodeVariable = useCallback((nodeId: string, varName: string, value: any) => {
+    setNodes(nds =>
+      nds.map(n => {
+        if (n.id !== nodeId) return n;
+        return {
+          ...n,
+          data: {
+            ...n.data,
+            variables: { ...n.data.variables, [varName]: value },
+          },
+        };
+      })
+    );
+    setSelectedNode(prev => {
+      if (!prev || prev.id !== nodeId) return prev;
+      return {
+        ...prev,
+        data: {
+          ...prev.data,
+          variables: { ...prev.data.variables, [varName]: value },
+        },
+      };
+    });
+  }, [setNodes]);
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -597,6 +668,8 @@ function WorkflowCanvas({ apiUrl, blockTypes, hookTypes, onBack, title }: Canvas
             onInit={setReactFlowInstance}
             onDrop={onDrop}
             onDragOver={onDragOver}
+            onNodeClick={onNodeClick}
+            onPaneClick={onPaneClick}
             nodeTypes={nodeTypes}
             fitView
             className="bg-slate-50"
@@ -615,6 +688,150 @@ function WorkflowCanvas({ apiUrl, blockTypes, hookTypes, onBack, title }: Canvas
             />
           </ReactFlow>
         </div>
+
+        {/* Config Panel — shown when a workflow node is selected */}
+        {selectedNode && (() => {
+          const blockDef = blockTypes.find(b => b.id === selectedNode.data?.type);
+          const varDefs = blockDef?.variables || [];
+          const varValues = selectedNode.data?.variables || {};
+
+          return (
+            <div className="w-80 bg-white border-l border-slate-200 overflow-y-auto shadow-lg">
+              <div className="p-6">
+                {/* Header */}
+                <div className="flex items-center justify-between mb-6">
+                  <div>
+                    <h2 className="text-lg font-semibold text-slate-900">Configure</h2>
+                    <p className="text-xs text-slate-500 mt-1">{selectedNode.data?.label}</p>
+                  </div>
+                  <button
+                    onClick={() => setSelectedNode(null)}
+                    className="p-1 text-slate-400 hover:text-slate-600 rounded transition-colors"
+                    title="Close panel"
+                  >
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+
+                {varDefs.length === 0 ? (
+                  <div className="text-center py-8">
+                    <p className="text-2xl mb-2">📦</p>
+                    <p className="text-sm text-slate-500">No configurable variables</p>
+                    <p className="text-xs text-slate-400 mt-1">
+                      This block type has no variables defined
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-5">
+                    {varDefs.map(varDef => {
+                      const value = varValues[varDef.name] ?? '';
+                      const inputId = `var-${selectedNode.id}-${varDef.name}`;
+                      const isEmpty = varDef.required && (value === '' || value === undefined || value === null);
+
+                      return (
+                        <div key={varDef.name}>
+                          <label htmlFor={inputId} className="block text-sm font-medium text-slate-700 mb-1">
+                            {varDef.label}
+                            {varDef.required && <span className="text-red-500 ml-1">*</span>}
+                          </label>
+
+                          {varDef.type === 'string' && (
+                            <input
+                              id={inputId}
+                              type="text"
+                              value={value}
+                              onChange={e => updateNodeVariable(selectedNode.id, varDef.name, e.target.value)}
+                              className={`w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-colors ${
+                                isEmpty ? 'border-red-300 bg-red-50' : 'border-slate-300'
+                              }`}
+                              placeholder={varDef.description || varDef.label}
+                            />
+                          )}
+
+                          {varDef.type === 'text' && (
+                            <textarea
+                              id={inputId}
+                              value={value}
+                              onChange={e => updateNodeVariable(selectedNode.id, varDef.name, e.target.value)}
+                              rows={3}
+                              className={`w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-colors resize-y ${
+                                isEmpty ? 'border-red-300 bg-red-50' : 'border-slate-300'
+                              }`}
+                              placeholder={varDef.description || varDef.label}
+                            />
+                          )}
+
+                          {varDef.type === 'number' && (
+                            <input
+                              id={inputId}
+                              type="number"
+                              value={value}
+                              onChange={e => updateNodeVariable(selectedNode.id, varDef.name, parseFloat(e.target.value) || 0)}
+                              step="any"
+                              className={`w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-colors ${
+                                isEmpty ? 'border-red-300 bg-red-50' : 'border-slate-300'
+                              }`}
+                              placeholder={varDef.description || varDef.label}
+                            />
+                          )}
+
+                          {varDef.type === 'boolean' && (
+                            <label className="flex items-center gap-3 cursor-pointer mt-1">
+                              <div
+                                className={`relative w-10 h-6 rounded-full transition-colors ${
+                                  value ? 'bg-indigo-600' : 'bg-slate-300'
+                                }`}
+                                onClick={() => updateNodeVariable(selectedNode.id, varDef.name, !value)}
+                              >
+                                <div
+                                  className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-transform ${
+                                    value ? 'translate-x-5' : 'translate-x-1'
+                                  }`}
+                                />
+                              </div>
+                              <span className="text-sm text-slate-600">{value ? 'Yes' : 'No'}</span>
+                            </label>
+                          )}
+
+                          {varDef.type === 'select' && (
+                            <select
+                              id={inputId}
+                              value={value}
+                              onChange={e => updateNodeVariable(selectedNode.id, varDef.name, e.target.value)}
+                              className={`w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-colors bg-white ${
+                                isEmpty ? 'border-red-300 bg-red-50' : 'border-slate-300'
+                              }`}
+                            >
+                              {(varDef.options || []).map(opt => (
+                                <option key={opt} value={opt}>{opt}</option>
+                              ))}
+                            </select>
+                          )}
+
+                          {varDef.description && varDef.type !== 'string' && varDef.type !== 'text' && (
+                            <p className="text-xs text-slate-400 mt-1">{varDef.description}</p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Node info */}
+                <div className="mt-8 pt-4 border-t border-slate-200">
+                  <p className="text-xs text-slate-400">
+                    Node ID: {selectedNode.id}
+                  </p>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Type: {selectedNode.data?.type}
+                  </p>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
       </div>
     </div>
   );

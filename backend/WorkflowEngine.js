@@ -344,6 +344,7 @@ class WorkflowEngine {
       fromNodeId: subject.currentNodeId,
       toNodeId: newNodeId,
       currentNodeId: newNodeId,
+      variables: targetNodeObj?.data?.variables || {},
     });
 
     // -- on_node_entry hooks --
@@ -351,10 +352,18 @@ class WorkflowEngine {
       ...context,
       currentNodeId: newNodeId,
       previousNodeId: subject.currentNodeId,
+      variables: targetNodeObj?.data?.variables || {},
     });
 
+    // Resolve variables configured on the target node
+    const targetNodeObj = workflow.nodes.find(n => n.id === newNodeId);
+    const nodeVariables = targetNodeObj?.data?.variables || {};
+
     // Execute the action handler for this node type
-    const actionResult = await this._executeAction(newNodeType, updatedSubject, context);
+    const actionResult = await this._executeAction(newNodeType, updatedSubject, {
+      ...context,
+      variables: nodeVariables,
+    });
 
     // Auto-progress if the action says so
     if (actionResult.autoProgress && updatedSubject.workflowId) {
@@ -412,7 +421,14 @@ class WorkflowEngine {
     await this._subjectRepo.setWorkflow(subjectId, workflowId, initial.nodeId, initial.nodeType);
     const subject = await this._subjectRepo.getById(subjectId);
 
-    const actionResult = await this._executeAction(initial.nodeType, subject, context);
+    // Resolve variables configured on the initial node
+    const initialNodeObj = workflow.nodes.find(n => n.id === initial.nodeId);
+    const nodeVariables = initialNodeObj?.data?.variables || {};
+
+    const actionResult = await this._executeAction(initial.nodeType, subject, {
+      ...context,
+      variables: nodeVariables,
+    });
 
     if (actionResult.autoProgress) {
       const nextStates = await this.getAvailableTransitions(subjectId);

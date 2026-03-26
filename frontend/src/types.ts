@@ -1,4 +1,25 @@
 /**
+ * Describes a configurable variable that a block accepts.
+ * Developers define these on their BlockType; users fill in values per-node in the editor.
+ */
+export interface VariableDefinition {
+  /** Machine name — used as the key in node.data.variables (e.g. "recipient") */
+  name: string;
+  /** Human-readable label shown in the config panel */
+  label: string;
+  /** Input type rendered in the config panel */
+  type: 'string' | 'number' | 'boolean' | 'select' | 'text';
+  /** Default value used when the node is first placed */
+  default?: string | number | boolean;
+  /** Whether the field is required (visual indicator only — does not block save) */
+  required?: boolean;
+  /** Available options when type is 'select' */
+  options?: string[];
+  /** Optional helper text shown below the input */
+  description?: string;
+}
+
+/**
  * Describes one entry in the block palette (workflow step or lifecycle hook).
  */
 export interface BlockType {
@@ -22,6 +43,13 @@ export interface BlockType {
   nodeType: 'standard' | 'decision' | 'terminal' | 'hook';
   /** Only required for hook blocks — the lifecycle trigger type */
   trigger?: 'on_message' | 'on_transition' | 'on_node_entry' | 'on_node_exit';
+  /**
+   * Configurable variables for this block type.
+   * When defined, users can set values per-node in the editor's config panel.
+   * Values are stored in node.data.variables and passed to the action handler
+   * as context.variables at runtime.
+   */
+  variables?: VariableDefinition[];
 }
 
 /**

@@ -24,6 +24,11 @@ export const blockTypes: BlockType[] = [
     color: 'bg-cyan-100 border-cyan-300 text-cyan-800',
     description: 'AI classifies the item automatically',
     nodeType: 'standard',
+    variables: [
+      { name: 'model', label: 'AI Model', type: 'select', options: ['gpt-4', 'gpt-3.5', 'claude'], description: 'Which AI model to use for classification' },
+      { name: 'confidence_threshold', label: 'Confidence Threshold', type: 'number', default: 0.8, description: 'Minimum confidence score (0-1)' },
+      { name: 'custom_prompt', label: 'Custom Prompt', type: 'text', description: 'Optional prompt override for classification' },
+    ],
   },
   {
     id: 'send_email',
@@ -32,6 +37,11 @@ export const blockTypes: BlockType[] = [
     color: 'bg-indigo-100 border-indigo-300 text-indigo-800',
     description: 'Send a notification email',
     nodeType: 'standard',
+    variables: [
+      { name: 'to', label: 'Recipient', type: 'string', required: true, description: 'Email address of the recipient' },
+      { name: 'template', label: 'Email Template', type: 'select', options: ['welcome', 'follow_up', 'resolution', 'escalation'] },
+      { name: 'include_transcript', label: 'Include Transcript', type: 'boolean', default: false, description: 'Attach the conversation transcript' },
+    ],
   },
   {
     id: 'needs_approval',
