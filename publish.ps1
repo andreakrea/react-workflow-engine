@@ -13,7 +13,9 @@ Write-Host "`n=== vise-workflow-engine publish ===" -ForegroundColor Cyan
 
 # 0. Check npm auth
 Write-Host "`n[0/5] Checking npm login..." -ForegroundColor Yellow
+$ErrorActionPreference = 'Continue'
 $npmUser = npm whoami 2>&1
+$ErrorActionPreference = 'Stop'
 if ($LASTEXITCODE -ne 0) {
     Write-Host "ERROR: Not logged in to npm. Run 'npm login' first." -ForegroundColor Red
     exit 1
