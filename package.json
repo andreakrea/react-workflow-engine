@@ -1,6 +1,6 @@
 {
   "name": "vise-workflow-engine",
-  "version": "1.1.4",
+  "version": "1.2.0",
   "description": "Generic graph-based workflow engine with drag-and-drop React editor — state machine, Express router, and ReactFlow UI in one package",
   "exports": {
     ".": "./backend/index.js",
