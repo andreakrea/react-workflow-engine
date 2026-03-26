@@ -192,13 +192,16 @@ Actions run when a node is entered. Hooks run at lifecycle moments.
 
 ```js
 // Actions (one per node type)
+// context.variables contains the values configured per-node in the editor
 engine.registerAction('send_email', async (subject, context) => {
-  await sendEmail(subject.email, 'Your ticket has been updated');
+  const { to, template, include_transcript } = context.variables;
+  await sendEmail(to || subject.email, template, { include_transcript });
   return { success: true, autoProgress: false };
 });
 
 engine.registerAction('auto_classify', async (subject, context) => {
-  const category = await classifier.run(subject);
+  const { model, confidence_threshold } = context.variables;
+  const category = await classifier.run(subject, { model, confidence_threshold });
   await knex('tickets').where({ id: subject.id }).update({ category });
   // autoProgress: true → engine automatically moves to the next node
   return { success: true, autoProgress: true };
@@ -365,12 +368,65 @@ The editor header includes buttons to **load**, **save**, **clear**, and **creat
 | `description` | `string` | Short help text |
 | `nodeType` | `'standard' \| 'decision' \| 'terminal' \| 'hook'` | Determines node shape and handles |
 | `trigger` | `'on_message' \| 'on_transition' \| 'on_node_entry' \| 'on_node_exit'` | Hook trigger (required for `hook` nodeType) |
+| `variables` | `VariableDefinition[]` | Optional configurable variables for this block type |
 
 **Node types:**
 - **standard** — 1 input, 1 output
 - **decision** — 1 input, 2 outputs (YES/NO branches)
 - **terminal** — 1 input, no output (end state)
 - **hook** — no handles (floating lifecycle trigger)
+
+### Block Variables
+
+Blocks can declare **configurable variables** that users fill in per-node via a config panel. When a node is clicked in the editor, a right-side panel appears with form fields for each variable.
+
+Variables are stored in `node.data.variables` and passed to action handlers at runtime as `context.variables`.
+
+#### VariableDefinition
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | `string` | Yes | Machine key (e.g. `"recipient"`) |
+| `label` | `string` | Yes | Human-readable label |
+| `type` | `'string' \| 'number' \| 'boolean' \| 'select' \| 'text'` | Yes | Input type rendered in the config panel |
+| `default` | `string \| number \| boolean` | No | Default value when the node is first placed |
+| `required` | `boolean` | No | Shows a visual required indicator (does not block save) |
+| `options` | `string[]` | No | Dropdown options (required when `type` is `'select'`) |
+| `description` | `string` | No | Helper text shown below the input |
+
+#### Example
+
+```tsx
+const blockTypes: BlockType[] = [
+  {
+    id: 'send_email',
+    label: 'Send Email',
+    icon: '📧',
+    color: 'bg-indigo-100 border-indigo-300',
+    description: 'Send a notification email',
+    nodeType: 'standard',
+    variables: [
+      { name: 'to', label: 'Recipient', type: 'string', required: true },
+      { name: 'template', label: 'Email Template', type: 'select', options: ['welcome', 'follow_up', 'resolution'] },
+      { name: 'include_transcript', label: 'Include Transcript', type: 'boolean', default: false },
+    ],
+  },
+  {
+    id: 'auto_classify',
+    label: 'Auto Classify',
+    icon: '🤖',
+    color: 'bg-cyan-100 border-cyan-300',
+    description: 'AI classifies the item',
+    nodeType: 'standard',
+    variables: [
+      { name: 'model', label: 'AI Model', type: 'select', options: ['gpt-4', 'gpt-3.5', 'claude'] },
+      { name: 'confidence_threshold', label: 'Confidence Threshold', type: 'number', default: 0.8 },
+    ],
+  },
+];
+```
+
+Blocks without `variables` work exactly as before — backward compatible.
 
 ---
 

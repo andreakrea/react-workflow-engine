@@ -72,7 +72,7 @@ A workflow is a directed graph:
   nodes: [
     { id: "node_1", data: { type: "start",           label: "Created" } },
     { id: "node_2", data: { type: "waiting_review",  label: "Waiting Review" } },
-    { id: "node_3", data: { type: "send_email",      label: "Send Email" } },
+    { id: "node_3", data: { type: "send_email",      label: "Send Email", variables: { to: "support@example.com", template: "follow_up", include_transcript: false } } },
     { id: "node_4", data: { type: "decision",        label: "Approved?" } },
     { id: "node_5", data: { type: "resolved",        label: "Resolved" } },
     { id: "node_6", data: { type: "rejected",        label: "Rejected" } },
@@ -89,6 +89,7 @@ A workflow is a directed graph:
 ```
 
 Node `data.type` is the key identifier used in action registration and transitions.
+Node `data.variables` (optional) stores per-node configuration values set in the editor’s config panel. The engine injects them into `context.variables` when executing action handlers and hooks.
 The engine auto-detects the start node by looking for `data.type === 'start'`, then `'created'`, then `nodes[0]`.
 
 For decision nodes with two outgoing edges, use `sourceHandle` values:
@@ -192,10 +193,13 @@ const subjectRepo = {
 
 Register one async handler per node type. Called automatically when the engine enters that node.
 
+The second argument `context` always includes a `variables` object containing any per-node values configured in the editor. If no variables are defined for the node, `context.variables` is `{}`.
+
 ```js
 // Returns: { success, autoProgress?, decision?, ...anything }
 engine.registerAction('send_email', async (subject, context) => {
-  await sendEmail(subject.email, 'Update on your ticket');
+  const { to, template, include_transcript } = context.variables;
+  await sendEmail(to || subject.email, template, { include_transcript });
   return { success: true, autoProgress: false };
 });
 
