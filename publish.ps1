@@ -11,6 +11,15 @@ $ErrorActionPreference = 'Stop'
 
 Write-Host "`n=== vise-workflow-engine publish ===" -ForegroundColor Cyan
 
+# 0. Check npm auth
+Write-Host "`n[0/5] Checking npm login..." -ForegroundColor Yellow
+$npmUser = npm whoami 2>&1
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "ERROR: Not logged in to npm. Run 'npm login' first." -ForegroundColor Red
+    exit 1
+}
+Write-Host "  Logged in as: $npmUser" -ForegroundColor Green
+
 # 1. Ensure working directory is clean
 $status = git status --porcelain
 if ($status) {
@@ -36,9 +45,10 @@ if (-not (Test-Path "frontend/dist/index.mjs")) {
 
 # 4. Bump version
 Write-Host "`n[2/5] Bumping version ($Bump)..." -ForegroundColor Yellow
+$oldVersion = (Get-Content package.json | ConvertFrom-Json).version
 npm version $Bump --no-git-tag-version
 $version = (Get-Content package.json | ConvertFrom-Json).version
-Write-Host "  New version: $version" -ForegroundColor Green
+Write-Host "  $oldVersion -> $version" -ForegroundColor Green
 
 # 5. Dry run
 Write-Host "`n[3/5] Running publish dry-run..." -ForegroundColor Yellow
@@ -49,19 +59,24 @@ if ($LASTEXITCODE -ne 0) { Write-Host "ERROR: Dry run failed" -ForegroundColor R
 Write-Host ""
 $confirm = Read-Host "Publish v$version to npm? (y/N)"
 if ($confirm -ne 'y') {
-    Write-Host "Aborted. Version was bumped to $version - revert with: git checkout package.json" -ForegroundColor Yellow
+    git checkout package.json package-lock.json 2>$null
+    Write-Host "Aborted. Version bump reverted." -ForegroundColor Yellow
     exit 0
 }
 
 # 7. Publish
 Write-Host "`n[4/5] Publishing to npm..." -ForegroundColor Yellow
-npm publish
-if ($LASTEXITCODE -ne 0) { Write-Host "ERROR: Publish failed" -ForegroundColor Red; exit 1 }
+npm publish --access public
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "ERROR: Publish failed. Reverting version bump..." -ForegroundColor Red
+    git checkout package.json package-lock.json 2>$null
+    exit 1
+}
 Write-Host "  Published vise-workflow-engine@$version" -ForegroundColor Green
 
 # 8. Git commit & tag
 Write-Host "`n[5/5] Committing and tagging..." -ForegroundColor Yellow
-git add package.json
+git add package.json package-lock.json
 git commit -m "release: v$version"
 git tag "v$version"
 Write-Host "  Tagged v$version - push with: git push; git push --tags" -ForegroundColor Green
