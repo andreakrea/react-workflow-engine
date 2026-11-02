@@ -1,29 +1,72 @@
 {
   "name": "vise-workflow-engine",
-  "version": "1.4.0",
-  "description": "Generic graph-based workflow engine with drag-and-drop React editor — state machine, Express router, and ReactFlow UI in one package",
-  "exports": {
-    ".": "./backend/index.js",
-    "./frontend": {
-      "import": "./frontend/dist/index.mjs",
-      "require": "./frontend/dist/index.cjs",
-      "types": "./frontend/dist/index.d.ts"
-    },
-    "./frontend/style.css": "./frontend/dist/style.css",
-    "./migrations": "./backend/migrations"
-  },
-  "main": "./backend/index.js",
-  "files": [
-    "backend/index.js",
-    "backend/WorkflowEngine.js",
-    "backend/WorkflowHooksDispatcher.js",
-    "backend/router.js",
-    "backend/license.js",
-    "backend/migrations",
-    "backend/knexfile.example.js",
-    "frontend/dist",
-    "README.md"
+  "version": "2.0.0",
+  "description": "Graph-based workflow engine with a drag-and-drop React editor. Typed blocks shared by server and editor, pluggable storage, framework-agnostic HTTP handler.",
+  "license": "MIT",
+  "sideEffects": [
+    "*.css"
   ],
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    },
+    "./knex": {
+      "import": {
+        "types": "./dist/knex.d.mts",
+        "default": "./dist/knex.mjs"
+      },
+      "require": {
+        "types": "./dist/knex.d.ts",
+        "default": "./dist/knex.js"
+      }
+    },
+    "./server": {
+      "import": {
+        "types": "./dist/server.d.mts",
+        "default": "./dist/server.mjs"
+      },
+      "require": {
+        "types": "./dist/server.d.ts",
+        "default": "./dist/server.js"
+      }
+    },
+    "./react": {
+      "import": {
+        "types": "./dist/react.d.mts",
+        "default": "./dist/react.mjs"
+      },
+      "require": {
+        "types": "./dist/react.d.ts",
+        "default": "./dist/react.js"
+      }
+    },
+    "./react/style.css": "./dist/style.css",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "migrations",
+    "README.md",
+    "AGENT.md"
+  ],
+  "scripts": {
+    "build": "tsup && node scripts/build-css.mjs",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build",
+    "dev:demo": "cd demo && npm run dev",
+    "deploy:demo": "cd demo && npm run build && cd .. && npx gh-pages -d demo/dist"
+  },
   "keywords": [
     "workflow",
     "state-machine",
@@ -36,23 +79,14 @@
     "drag-and-drop",
     "react"
   ],
-  "license": "MIT",
   "peerDependencies": {
-    "express": ">=4.0.0",
     "knex": ">=2.0.0",
-    "pg": ">=8.0.0",
     "react": ">=18.0.0",
     "react-dom": ">=18.0.0",
-    "reactflow": ">=11.0.0"
+    "reactflow": ">=11.10.0 <12"
   },
   "peerDependenciesMeta": {
-    "express": {
-      "optional": true
-    },
     "knex": {
-      "optional": true
-    },
-    "pg": {
       "optional": true
     },
     "react": {
@@ -65,12 +99,21 @@
       "optional": true
     }
   },
-  "scripts": {
-    "build": "cd frontend && npm run build",
-    "prepublishOnly": "npm run build",
-    "deploy:demo": "cd demo && npm run build && cd .. && npx gh-pages -d demo/dist"
+  "engines": {
+    "node": ">=18"
   },
   "devDependencies": {
-    "gh-pages": "^6.3.0"
+    "@types/node": "^20.19.43",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "better-sqlite3": "^11.10.0",
+    "gh-pages": "^6.3.0",
+    "knex": "^3.3.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "reactflow": "^11.11.4",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "vitest": "^2.1.9"
   }
 }

@@ -1,381 +1,74 @@
-# @workflow-engine/backend — Agent Instructions
+# vise-workflow-engine — notes for coding agents
 
-A generic graph-based workflow state machine for Node.js + Express + PostgreSQL.
-Zero domain knowledge — it works for any entity type (tickets, orders, disputes, etc.).
+Package: `vise-workflow-engine` (v2). Entry points: `vise-workflow-engine` (core, isomorphic), `/knex`, `/server`, `/react`, `/react/style.css`. There is no `/frontend` entry, no `WorkflowEngine` class, no `createWorkflowRouter` — those were 1.x.
 
----
+## Integration = 3 files
 
-## Installation
-
-```bash
-npm install @workflow-engine/backend express knex pg
+1. **`workflow.config.ts`**, imported by server and client:
+```ts
+import { defineBlocks, defineHooks, v } from 'vise-workflow-engine';
+export const blocks = defineBlocks({
+  start: { kind: 'start', label: 'Start', color: '#dcfce7' },
+  review: { kind: 'step', label: 'Review' },                                   // no action → waits for engine.move()
+  notify: { kind: 'step', label: 'Notify', variables: { to: v.string({ required: true }) } },
+  approve: { kind: 'decision', label: 'Approve?', branches: ['yes', 'no'] },   // default branches are yes/no
+  done: { kind: 'end', label: 'Done' },
+});
+export const hooks = defineHooks({ audit: { trigger: 'on_transition', label: 'Audit' } });
 ```
+Kinds: `start | step | decision | end`. Variables: `v.string|text|number|boolean(opts)`, `v.select([...], opts)`; opts `{ label, description, placeholder, required, default }` (a default makes it required).
 
-A license key must be validated before any engine or router calls will work:
-
-```js
-const { validateLicense } = require('@workflow-engine/backend');
-
-const result = validateLicense(process.env.WORKFLOW_LICENSE_KEY);
-if (!result.valid) throw new Error(result.error);
-```
-
----
-
-## Database Setup
-
-The package owns a single table: `workflows`. Run the bundled migration once:
-
-```js
-// knexfile.js
-module.exports = {
-  client: 'pg',
-  connection: {
-    host: process.env.DB_HOST,
-    database: process.env.DB_NAME,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
+2. **Server**:
+```ts
+import { createEngine, validateLicense } from 'vise-workflow-engine';
+import { knexStores } from 'vise-workflow-engine/knex';
+import { createHandler, toNodeHandler } from 'vise-workflow-engine/server';
+validateLicense(process.env.WORKFLOW_ENGINE_KEY);
+const engine = createEngine({
+  ...knexStores(knex, { subjects: { table: 'tickets', columns: { nodeType: 'status' } } }),
+  blocks, hooks,
+  actions: {
+    start: () => ({ next: true }),
+    notify: async ({ subject, variables, tx }) => { await send(variables.to); return { next: true }; },
+    approve: ({ subject }) => ({ branch: subject.amount < 500 ? 'yes' : 'no' }),
   },
-  migrations: {
-    directory: require('@workflow-engine/backend').migrationsPath,
-  },
-};
-```
-
-```bash
-npx knex migrate:latest
-```
-
-The `workflows` table schema:
-
-| Column       | Type      | Notes                          |
-|--------------|-----------|--------------------------------|
-| id           | integer   | primary key, auto-increment    |
-| name         | string    | required                       |
-| description  | text      | optional                       |
-| nodes        | json      | array of node objects          |
-| edges        | json      | array of edge objects          |
-| hooks        | jsonb     | array of hook config objects   |
-| created_by   | string    | optional, no FK enforced       |
-| created_at   | timestamp |                                |
-| updated_at   | timestamp |                                |
-
----
-
-## Workflow Definition Structure
-
-A workflow is a directed graph:
-
-```js
-{
-  name: "Support Ticket Flow",
-  nodes: [
-    { id: "node_1", data: { type: "start",           label: "Created" } },
-    { id: "node_2", data: { type: "waiting_review",  label: "Waiting Review" } },
-    { id: "node_3", data: { type: "send_email",      label: "Send Email", variables: { to: "support@example.com", template: "follow_up", include_transcript: false } } },
-    { id: "node_4", data: { type: "decision",        label: "Approved?" } },
-    { id: "node_5", data: { type: "resolved",        label: "Resolved" } },
-    { id: "node_6", data: { type: "rejected",        label: "Rejected" } },
-  ],
-  edges: [
-    { id: "e1", source: "node_1", target: "node_2" },
-    { id: "e2", source: "node_2", target: "node_3" },
-    { id: "e3", source: "node_3", target: "node_4" },
-    { id: "e4", source: "node_4", target: "node_5", sourceHandle: "true" },
-    { id: "e5", source: "node_4", target: "node_6", sourceHandle: "false" },
-  ],
-  hooks: [],
-}
-```
-
-Node `data.type` is the key identifier used in action registration and transitions.
-Node `data.variables` (optional) stores per-node configuration values set in the editor’s config panel. The engine injects them into `context.variables` when executing action handlers and hooks.
-The engine auto-detects the start node by looking for `data.type === 'start'`, then `'created'`, then `nodes[0]`.
-
-For decision nodes with two outgoing edges, use `sourceHandle` values:
-- Positive branch: `"true"`, `"yes"`, `"approved"`, `"success"`, `"accepted"`, `"progress"`
-- Negative branch: `"false"`, `"no"`, `"rejected"`, `"cancel"`, `"declined"`
-
----
-
-## REST API for Workflow CRUD — `createWorkflowRouter`
-
-Mount this to manage workflow definitions stored in the database.
-
-```js
-const express = require('express');
-const knex = require('knex')(require('./knexfile'));
-const { validateLicense, createWorkflowRouter } = require('@workflow-engine/backend');
-
-validateLicense(process.env.WORKFLOW_LICENSE_KEY);
-
-const app = express();
-app.use(express.json());
-
-app.use('/api/workflows', createWorkflowRouter({
-  knex,
-  authMiddleware: requireAuth, // optional Express middleware
-}));
-```
-
-### Endpoints
-
-| Method | Path            | Body / Notes                                               | Response                         |
-|--------|-----------------|------------------------------------------------------------|----------------------------------|
-| GET    | `/`             | —                                                          | `{ success, workflows: [...] }`  |
-| GET    | `/:id`          | —                                                          | `{ success, workflow: {...} }`   |
-| POST   | `/`             | `{ name, nodes, edges, hooks?, description?, created_by? }` | `{ success, message, workflow }` |
-| PUT    | `/:id`          | Any subset of POST body fields                             | `{ success, message, workflow }` |
-| DELETE | `/:id`          | —                                                          | `{ success, message }`           |
-
-`nodes` and `edges` are returned as parsed objects (not raw JSON strings).
-
----
-
-## Running the State Machine — `WorkflowEngine`
-
-The engine drives a *subject* (any entity in your DB) through a workflow.
-It does **not** own your entity table — you supply a `subjectRepo` adapter.
-
-```js
-const { WorkflowEngine } = require('@workflow-engine/backend');
-
-const engine = new WorkflowEngine({
-  knex,                 // required — used to read the workflows table
-  subjectRepo,          // required — adapter to your entity table (see below)
-  hookDispatcher,       // optional — WorkflowHooksDispatcher instance
-  actionRegistry,       // optional — external action registry object
-  onCancelTracking,     // optional — async (subjectId, nodeId) => void
-  onLogHookExecution,   // optional — async (subjectId, hookData) => void
+  hookHandlers: { audit: ({ subject, from, to }) => log(subject.id, from?.id, to?.id) },
 });
+app.use('/api/workflows', auth, toNodeHandler(createHandler({ store: engine.workflows, validate: engine.validate, scope: (_r, { req }) => ({ tenant_id: req.user.orgId }) })));
 ```
 
-### `subjectRepo` interface
-
-You must implement these three methods against your own database table:
-
-```js
-const subjectRepo = {
-  // Return the entity. MUST include these fields:
-  async getById(id) {
-    const row = await knex('tickets').where({ id }).first();
-    return row ? {
-      id:            row.id,
-      workflowId:    row.workflow_id,
-      currentNodeId: row.current_node_id,
-      status:        row.status,
-      // ...any extra fields your action handlers need
-    } : null;
-  },
-
-  // Called after every transition
-  async updateState(id, newNodeId, newNodeType) {
-    await knex('tickets').where({ id }).update({
-      current_node_id: newNodeId,
-      status:          newNodeType,
-      updated_at:      knex.fn.now(),
-    });
-  },
-
-  // Called once when a workflow is first assigned to the entity
-  async setWorkflow(id, workflowId, initialNodeId, initialNodeType) {
-    await knex('tickets').where({ id }).update({
-      workflow_id:     workflowId,
-      current_node_id: initialNodeId,
-      status:          initialNodeType,
-      updated_at:      knex.fn.now(),
-    });
-  },
-};
+3. **Client**:
+```tsx
+import { WorkflowEditor, createHttpClient } from 'vise-workflow-engine/react';
+import 'vise-workflow-engine/react/style.css';
+const client = createHttpClient({ baseUrl: '/api/workflows', headers: () => ({ Authorization: `Bearer ${token}` }) });
+<div style={{ height: 600 }}><WorkflowEditor blocks={blocks} hooks={hooks} client={client} workflowId={id} onSaved={...} onError={...} /></div>
 ```
+`baseUrl` is the exact mount path (nothing appended). The editor fills its parent; the parent needs a height. Controlled alternative: `value` + `onChange(draft, issues)` without `client`.
 
-### Registering action handlers
+## Engine API
 
-Register one async handler per node type. Called automatically when the engine enters that node.
+- `engine.start(subjectId, workflowId, { input? })` → `{ subject, node, path, status: 'waiting' | 'completed' }`
+- `engine.move(subjectId, { next: true } | { branch } | { to, force? }, { input? })` — same result
+- `engine.next(subjectId)` → `[{ nodeId, type, label, branch, branchLabel }]`; `engine.can(subjectId, move)`
+- `engine.emit(subjectId, trigger, input)` — runs hooks for e.g. `'on_message'`
+- `engine.on('transitioned' | 'completed' | 'actionError' | 'hookError' | 'hookExecuted', fn)`
+- `engine.validate(workflow)` → `ValidationIssue[]`
 
-The second argument `context` always includes a `variables` object containing any per-node values configured in the editor. If no variables are defined for the node, `context.variables` is `{}`.
+Action context: `{ subject, node, variables, workflow, input, tx }`. Return nothing (wait), `{ next: true }`, `{ branch }`, or `{ to }`. Hook context: `{ subject, hook, config, trigger, node, from, to, workflow, input, tx }`.
 
-```js
-// Returns: { success, autoProgress?, decision?, ...anything }
-engine.registerAction('send_email', async (subject, context) => {
-  const { to, template, include_transcript } = context.variables;
-  await sendEmail(to || subject.email, template, { include_transcript });
-  return { success: true, autoProgress: false };
-});
+Per step: `on_node_exit` → persist → `on_transition` → `on_node_entry` → action. Errors are `WorkflowError` with `code` (`INVALID_TRANSITION`, `AMBIGUOUS_TRANSITION`, `ACTION_FAILED`, `MAX_STEPS`, `NO_WORKFLOW`, `SUBJECT_NOT_FOUND`, `WORKFLOW_NOT_FOUND`, `INVALID_WORKFLOW`); check with `isWorkflowError`. With knexStores each call is one transaction with the subject row locked.
 
-engine.registerAction('auto_approve', async (subject, context) => {
-  const approved = await checkEligibility(subject);
-  // autoProgress: true + decision tells the engine to immediately follow
-  // the matching outgoing edge without waiting for an external call
-  return { success: true, autoProgress: true, decision: approved };
-});
-```
+## Data
 
-If no handler is registered for a node type, the engine logs a warning and continues (does not throw).
+Table `workflows` (bundled migration: `require('vise-workflow-engine/knex').migrationsPath`, add it to knex `migrations.directory` as an array entry; or `createWorkflowsTable(knex)`). Subject table needs `workflow_id` + `current_node_id` (configurable via `columns`).
 
-### Engine methods
+Stored workflow: `{ id, name, description, nodes: [{ id, position, data: { type, label?, variables } }], edges: [{ id, source, target, sourceHandle? /* branch id */ }], hooks: [{ id, type, trigger, scope: 'all' | nodeId[], enabled, config, position }] }`.
 
-```js
-// Assign a workflow to a subject and land on the start node.
-// Fires the start node's action handler and auto-progresses if needed.
-await engine.initializeSubject(subjectId, workflowId, context?);
+## HTTP
 
-// Transition to a specific node by node id OR node type string.
-await engine.transition(subjectId, 'waiting_review', context?);
-await engine.transition(subjectId, 'node_3', context?);
+`GET /` `{ workflows }` · `GET /:id` `{ workflow, issues }` · `POST /` 201 · `PUT|PATCH /:id` · `DELETE /:id` 204 · errors `{ error: { code, message, details? } }`. Next.js/Hono/Bun: `createHandler({ store, basePath: '/api/workflows' })` and use it as a fetch handler.
 
-// Transition using a boolean or string decision from the current node.
-await engine.transitionByDecision(subjectId, true, context?);
-await engine.transitionByDecision(subjectId, 'approved', context?);
+## Testing
 
-// Check if a transition to a given node is valid from the current state.
-const ok = await engine.canTransition(subjectId, 'node_3');
-
-// List valid next nodes from the subject's current position.
-const next = await engine.getAvailableTransitions(subjectId);
-// → [{ nodeId, nodeType, edge }, ...]
-
-// Manually fire lifecycle hooks (e.g. from a webhook handler).
-await engine.executeHooks(subjectId, 'on_message', context?);
-```
-
-All state-machine methods return the updated subject merged with `{ actionResult }`.
-
----
-
-## Lifecycle Hooks — `WorkflowHooksDispatcher`
-
-Hooks are config objects stored inside the workflow definition and fired automatically by the engine at four trigger points:
-
-| Trigger         | When it fires                            |
-|-----------------|------------------------------------------|
-| `on_node_entry` | After the engine lands on a new node     |
-| `on_node_exit`  | Before the engine leaves a node          |
-| `on_transition` | After state is persisted, before entry   |
-| `on_message`    | Manually — call `engine.executeHooks()`  |
-
-A hook config (inside `workflow.hooks`):
-
-```js
-{
-  id: "hook_1",
-  type: "send_slack_alert",   // matches the registered handler key
-  trigger: "on_node_entry",
-  scope: "all",               // "all" or array of nodeIds that activate it
-  enabled: true,
-  config: { channel: "#support" }, // passed to your handler via hook.config
-}
-```
-
-Registering handlers:
-
-```js
-const { WorkflowHooksDispatcher } = require('@workflow-engine/backend');
-
-const hookDispatcher = new WorkflowHooksDispatcher();
-
-hookDispatcher.register('send_slack_alert', async (subject, hook, context) => {
-  await slack.post(hook.config.channel, `Ticket ${subject.id} moved to ${context.currentNodeId}`);
-  return { success: true };
-});
-
-hookDispatcher.register('escalation_detector', async (subject, hook, context) => {
-  const escalating = await aiDetect(subject.id);
-  if (escalating) await flagTicket(subject.id);
-  return { success: true, escalating };
-});
-
-const engine = new WorkflowEngine({ knex, subjectRepo, hookDispatcher });
-```
-
-Handler signature: `async (subject, hook, context) => { success: boolean, ...anything }`
-
-`context` always includes `currentNodeId` plus anything passed to the engine method.
-
----
-
-## Complete Setup Example
-
-```js
-const express = require('express');
-const knex = require('knex')({
-  client: 'pg',
-  connection: process.env.DATABASE_URL,
-});
-
-const {
-  validateLicense,
-  WorkflowEngine,
-  WorkflowHooksDispatcher,
-  createWorkflowRouter,
-} = require('@workflow-engine/backend');
-
-validateLicense(process.env.WORKFLOW_LICENSE_KEY);
-
-const app = express();
-app.use(express.json());
-
-// 1. Mount CRUD router for managing workflow definitions
-app.use('/api/workflows', createWorkflowRouter({ knex }));
-
-// 2. Set up the state machine
-const subjectRepo = {
-  async getById(id) {
-    const row = await knex('tickets').where({ id }).first();
-    return row ? { id: row.id, workflowId: row.workflow_id, currentNodeId: row.current_node_id, status: row.status } : null;
-  },
-  async updateState(id, nodeId, nodeType) {
-    await knex('tickets').where({ id }).update({ current_node_id: nodeId, status: nodeType, updated_at: knex.fn.now() });
-  },
-  async setWorkflow(id, workflowId, nodeId, nodeType) {
-    await knex('tickets').where({ id }).update({ workflow_id: workflowId, current_node_id: nodeId, status: nodeType, updated_at: knex.fn.now() });
-  },
-};
-
-const hookDispatcher = new WorkflowHooksDispatcher();
-hookDispatcher.register('notify', async (subject, hook, context) => {
-  console.log(`Notify: ticket ${subject.id} is now at ${context.currentNodeId}`);
-  return { success: true };
-});
-
-const engine = new WorkflowEngine({ knex, subjectRepo, hookDispatcher });
-
-engine.registerAction('send_email', async (subject, context) => {
-  await sendEmail(subject.email, 'Your ticket was updated');
-  return { success: true, autoProgress: true };
-});
-
-// 3. API routes that drive the state machine
-app.post('/api/tickets/:id/start', async (req, res) => {
-  const result = await engine.initializeSubject(req.params.id, req.body.workflowId);
-  res.json(result);
-});
-
-app.post('/api/tickets/:id/transition', async (req, res) => {
-  const result = await engine.transition(req.params.id, req.body.node);
-  res.json(result);
-});
-
-app.post('/api/tickets/:id/decide', async (req, res) => {
-  const result = await engine.transitionByDecision(req.params.id, req.body.decision);
-  res.json(result);
-});
-
-app.listen(3000);
-```
-
----
-
-## License Key
-
-The engine and router are gated behind a license key. Call `validateLicense()` once at startup before using any other export. The key encodes `org`, `plan`, and optional `exp` (expiry timestamp).
-
-```js
-const { validateLicense, getLicenseInfo } = require('@workflow-engine/backend');
-
-validateLicense(process.env.WORKFLOW_LICENSE_KEY);
-
-const info = getLicenseInfo(); // → { org, plan } or null
-```
-
-If the key is missing, expired, or invalid, `validateLicense` returns `{ valid: false, error: '...' }` and subsequent engine/router calls will throw.
+`memoryStores({ workflows, subjects })` gives in-memory stores; `createLocalClient()` gives an editor client backed by localStorage.

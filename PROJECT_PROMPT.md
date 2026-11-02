@@ -17,12 +17,11 @@ The core idea: businesses sign up, visually design their support workflow using 
 - **Real-time**: Socket.io for live chat and agent dashboard updates
 - **Auth**: JWT-based authentication with bcrypt password hashing
 - **File storage**: Local uploads or S3-compatible storage for attachments
-- **Workflow engine**: `npm install vise-workflow-engine` — this package provides:
-  - `WorkflowEngine` — graph-based state machine (manages ticket states/transitions)
-  - `WorkflowHooksDispatcher` — lifecycle hooks (on_message, on_transition, on_node_entry, on_node_exit)
-  - `createWorkflowRouter` — Express CRUD routes for workflow management
-  - `WorkflowEditor` — React drag-and-drop visual editor component
-  - Import: backend from `vise-workflow-engine`, frontend from `vise-workflow-engine/frontend`
+- **Workflow engine**: `npm install vise-workflow-engine` (v2) — read `node_modules/vise-workflow-engine/AGENT.md` first. It provides:
+  - `createEngine` — graph-based state machine (ticket states, typed actions per block, lifecycle hooks), from `vise-workflow-engine`
+  - `knexStores` — Postgres storage for workflows + your `conversations` table, from `vise-workflow-engine/knex`
+  - `createHandler` / `toNodeHandler` — workflow CRUD HTTP API, from `vise-workflow-engine/server`
+  - `WorkflowEditor` / `createHttpClient` — React drag-and-drop editor, from `vise-workflow-engine/react`
 
 ---
 
@@ -61,7 +60,7 @@ messages
   attachments (JSONB), ai_suggested_reply (text),
   created_at
 
-workflows (managed by vise-workflow-engine — already has its own migration)
+workflows (managed by vise-workflow-engine — add require('vise-workflow-engine/knex').migrationsPath to your knex migration directories, or call createWorkflowsTable(knex, { extend: t => t.integer('business_id') }))
 
 ai_actions
   id, business_id (FK), name, type (classify|auto_reply|summarize|sentiment|custom),
@@ -158,71 +157,92 @@ knowledge_base_articles
 
 ## Key Integration: How vise-workflow-engine fits in
 
-```javascript
-// server/src/workflow-setup.ts
-const { WorkflowEngine, WorkflowHooksDispatcher, createWorkflowRouter, validateLicense } = require('vise-workflow-engine');
+Define the blocks once and import them on both sides:
 
-// Activate license
-validateLicense('YOUR_KEY_HERE');
+```ts
+// shared/workflow.config.ts
+import { defineBlocks, defineHooks, v } from 'vise-workflow-engine';
 
-// Mount workflow CRUD routes
-app.use(createWorkflowRouter(knex));
+export const blocks = defineBlocks({
+  start:          { kind: 'start', label: 'New conversation', icon: '🟢', color: '#dcfce7' },
+  triage:         { kind: 'decision', label: 'Triage', icon: '📋', color: '#fef9c3', branches: ['ai', 'human'] },
+  ai_response:    { kind: 'step', label: 'AI Auto-Reply', icon: '🤖', color: '#dbeafe',
+                    variables: { ai_action_id: v.number({ label: 'AI action', required: true }), min_confidence: v.number({ default: 0.7 }) } },
+  human_queue:    { kind: 'step', label: 'Agent Queue', icon: '👤', color: '#dcfce7' },
+  in_progress:    { kind: 'step', label: 'In Progress', icon: '🔄', color: '#f3e8ff' },
+  needs_approval: { kind: 'decision', label: 'Needs Approval', icon: '✋', color: '#ffedd5' },
+  resolved:       { kind: 'end', label: 'Resolved', icon: '✅', color: '#d1fae5' },
+  closed:         { kind: 'end', label: 'Closed', icon: '🔒', color: '#f1f5f9' },
+});
+
+export const hooks = defineHooks({
+  on_new_message: { trigger: 'on_message', label: 'New Message Handler', icon: '💬', config: { ai_action_id: v.number() } },
+  on_escalation:  { trigger: 'on_transition', label: 'Escalation Hook', icon: '🚨' },
+  on_resolve:     { trigger: 'on_node_entry', label: 'Resolution Hook', icon: '📊' },
+});
+```
+
+```ts
+// server/src/services/workflow.ts
+import { createEngine, validateLicense } from 'vise-workflow-engine';
+import { knexStores } from 'vise-workflow-engine/knex';
+import { createHandler, toNodeHandler } from 'vise-workflow-engine/server';
+import { blocks, hooks } from '../../shared/workflow.config';
+
+validateLicense(process.env.WORKFLOW_ENGINE_KEY);
+
+export const engine = createEngine({
+  ...knexStores(knex, { subjects: { table: 'conversations', columns: { nodeType: 'status' } } }),
+  blocks,
+  hooks,
+  actions: {
+    start: () => ({ next: true }),
+    triage: async ({ subject }) => ({ branch: (await ai.classify(subject)).needsHuman ? 'human' : 'ai' }),
+    ai_response: async ({ subject, variables, tx }) => {
+      const reply = await ai.reply(subject, variables.ai_action_id);
+      if (reply.confidence < variables.min_confidence) return { to: 'human_queue' };
+      await saveMessage(tx, subject.id, reply);
+      // no return → wait for the next customer message
+    },
+    // human_queue / in_progress / needs_approval wait for agents: engine.move(id, { next: true } | { branch: 'yes' })
+  },
+  hookHandlers: {
+    on_new_message: ({ subject, config, input }) => ai.runAction(config.ai_action_id, subject, input.message),
+    on_escalation: ({ subject, to }) => notifyManagers(subject, to),
+    on_resolve: ({ subject }) => sendSatisfactionSurvey(subject),
+  },
+});
+
+// Workflow CRUD, scoped to the business
+app.use('/api/workflows', requireAuth, toNodeHandler(createHandler({
+  store: engine.workflows,
+  validate: engine.validate,
+  scope: (_req, { req }) => ({ business_id: req.user.businessId }),
+  authorize: (_req, action, { req }) => action === 'list' || action === 'read' || req.user.role !== 'agent',
+  createdBy: (_req, { req }) => String(req.user.id),
+})));
 
 // When a new message arrives on a conversation:
-async function handleIncomingMessage(conversationId, message) {
-  const conversation = await getConversation(conversationId);
-  const workflow = await getWorkflow(conversation.workflow_id);
-
-  // Create engine instance with the workflow graph
-  const engine = new WorkflowEngine(workflow, knex);
-
-  // Get available transitions from current node
-  const transitions = engine.getTransitions(conversation.current_node_id);
-
-  // Dispatch hooks — triggers any AI actions bound to on_message
-  const dispatcher = new WorkflowHooksDispatcher(workflow.hooks);
-  await dispatcher.dispatch('on_message', {
-    conversation,
-    message,
-    currentNode: conversation.current_node_id,
-  });
-
-  // AI decides if it should auto-reply or escalate
-  // (based on workflow configuration)
+export async function handleIncomingMessage(conversationId: number, message: Message) {
+  await engine.emit(conversationId, 'on_message', { message });
 }
 ```
 
 ```tsx
 // client/src/pages/WorkflowSettings.tsx
-import WorkflowEditor from 'vise-workflow-engine/frontend';
-import 'vise-workflow-engine/frontend/style.css';
+import { WorkflowEditor, createHttpClient } from 'vise-workflow-engine/react';
+import 'vise-workflow-engine/react/style.css';
+import { blocks, hooks } from '../../../shared/workflow.config';
 
-// Block types specific to customer care
-const blockTypes = [
-  { id: 'triage', label: 'Triage', icon: '📋', color: 'bg-yellow-100 border-yellow-300 text-yellow-900', description: 'AI classifies and routes the ticket', nodeType: 'standard' },
-  { id: 'ai_response', label: 'AI Auto-Reply', icon: '🤖', color: 'bg-blue-100 border-blue-300 text-blue-900', description: 'AI handles the conversation', nodeType: 'standard' },
-  { id: 'human_queue', label: 'Agent Queue', icon: '👤', color: 'bg-green-100 border-green-300 text-green-900', description: 'Waiting for human agent', nodeType: 'standard' },
-  { id: 'in_progress', label: 'In Progress', icon: '🔄', color: 'bg-purple-100 border-purple-300 text-purple-900', description: 'Agent is handling the ticket', nodeType: 'standard' },
-  { id: 'needs_approval', label: 'Needs Approval', icon: '✋', color: 'bg-orange-100 border-orange-300 text-orange-900', description: 'Requires manager approval', nodeType: 'decision' },
-  { id: 'resolved', label: 'Resolved', icon: '✅', color: 'bg-emerald-100 border-emerald-300 text-emerald-900', description: 'Issue resolved', nodeType: 'terminal' },
-  { id: 'closed', label: 'Closed', icon: '🔒', color: 'bg-gray-100 border-gray-300 text-gray-900', description: 'Ticket closed', nodeType: 'terminal' },
-];
+const client = createHttpClient({ baseUrl: '/api/workflows', headers: () => ({ Authorization: `Bearer ${getToken()}` }) });
 
-const hookTypes = [
-  { id: 'on_new_message', label: 'New Message Handler', icon: '💬', color: 'bg-cyan-100 border-cyan-300', description: 'Runs AI analysis on every new message', nodeType: 'hook', trigger: 'on_message' },
-  { id: 'on_escalation', label: 'Escalation Hook', icon: '🚨', color: 'bg-red-100 border-red-300', description: 'Notifies manager when ticket is escalated', nodeType: 'hook', trigger: 'on_transition' },
-  { id: 'on_resolve', label: 'Resolution Hook', icon: '📊', color: 'bg-green-100 border-green-300', description: 'Sends satisfaction survey on resolve', nodeType: 'hook', trigger: 'on_node_entry' },
-];
-
-function WorkflowSettings() {
+export default function WorkflowSettings() {
+  const [id, setId] = useState<number | null>(null);
   return (
-    <WorkflowEditor
-      apiUrl="/api"
-      blockTypes={blockTypes}
-      hookTypes={hookTypes}
-      licenseKey="YOUR_KEY"
-      title="Support Workflow Designer"
-    />
+    <div style={{ height: 'calc(100vh - 64px)' }}>
+      <WorkflowEditor blocks={blocks} hooks={hooks} client={client} workflowId={id} onWorkflowIdChange={setId}
+        title="Support Workflow" onSaved={() => toast.success('Saved')} onError={(e) => toast.error(String(e))} />
+    </div>
   );
 }
 ```
@@ -235,7 +255,7 @@ function WorkflowSettings() {
 - Rate limit the AI endpoints per business based on their plan
 - Store OpenAI API keys per business (they bring their own) OR use a shared key and track usage
 - The chat widget must be lightweight (<50KB gzipped), load asynchronously, and not block the host page
-- Use database transactions when transitioning workflow state + creating messages + dispatching hooks
+- Workflow moves already run in one transaction (knexStores); write messages inside actions/hooks through the `tx` they receive so they commit or roll back with the move
 - Index `conversations` on `(business_id, status)` and `(business_id, assigned_agent_id)` for dashboard queries
 - All WebSocket connections must be authenticated and scoped to business
 

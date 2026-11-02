@@ -4,15 +4,17 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "predev": "npm --prefix .. run build",
     "dev": "vite",
-    "build": "vite build",
+    "prebuild": "npm --prefix .. run build",
+    "build": "tsc --noEmit && vite build",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@fontsource-variable/inter": "^5.3.0",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
-    "reactflow": "^11.11.4",
-    "vise-workflow-engine": "^1.2.0"
+    "reactflow": "^11.11.4"
   },
   "devDependencies": {
     "@types/react": "^18.3.0",
