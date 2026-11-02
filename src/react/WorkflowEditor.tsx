@@ -10,6 +10,7 @@ import {
   addEdge,
   useEdgesState,
   useNodesState,
+  useNodesInitialized,
   useReactFlow,
   type Connection,
   type Edge,
@@ -72,6 +73,8 @@ export interface WorkflowEditorProps<Id extends WorkflowId = WorkflowId> {
 type Status = { kind: 'idle' | 'saving' | 'saved' | 'loading' } | { kind: 'error'; message: string };
 type Selection = { kind: 'node' | 'hook'; id: string } | null;
 
+const FIT = { padding: 0.2, maxZoom: 1.1 };
+
 /** Comparable snapshot of the persisted parts of the editor state. */
 const signature = (name: string, description: string | null, nodes: FlowNode[], edges: Edge[], hooks: WorkflowHook[]) =>
   JSON.stringify({ name, description, ...fromFlow(nodes, edges, hooks) });
@@ -109,6 +112,9 @@ function Editor(props: WorkflowEditorProps) {
   const [list, setList] = useState<Workflow[] | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  // Fit the view once the loaded nodes are measured, and again on resize until the user pans or zooms.
+  const pendingFit = useRef(false);
+  const userMovedView = useRef(false);
   const lastEmitted = useRef<WorkflowDraft | null>(null);
   const propsRef = useRef(props);
   propsRef.current = props;
@@ -132,7 +138,8 @@ function Editor(props: WorkflowEditorProps) {
       setDescription(draft.description ?? null);
       setCurrentId(draft.id ?? null);
       setSelection(null);
-      requestAnimationFrame(() => rf.fitView({ padding: 0.2, maxZoom: 1.1 }));
+      pendingFit.current = flow.nodes.length > 0;
+      userMovedView.current = false;
     },
     [blocks, rf, setEdges, setNodes],
   );
@@ -208,6 +215,30 @@ function Editor(props: WorkflowEditorProps) {
   // Dirty = differs from what was last loaded or saved, so selecting or undoing an edit doesn't count.
   const dirty = sig !== savedSig;
   const issues = useMemo(() => validateWorkflow(draft, { blocks, hooks: hookDefs }), [draft, blocks, hookDefs]);
+
+  const nodesMeasured = useNodesInitialized();
+  useEffect(() => {
+    if (!nodesMeasured || !pendingFit.current) return;
+    pendingFit.current = false;
+    void rf.fitView(FIT);
+  }, [nodesMeasured, rf]);
+
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    let frame = 0;
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        if (!userMovedView.current && !pendingFit.current && rf.getNodes().length) void rf.fitView(FIT);
+      });
+    });
+    observer.observe(el);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [rf]);
   const issuesByNode = useMemo(() => {
     const map = new Map<string, ValidationIssue[]>();
     for (const i of issues) {
@@ -575,13 +606,16 @@ function Editor(props: WorkflowEditorProps) {
                 }
               }}
               onPaneClick={() => setSelection(null)}
+              onMoveStart={(event) => {
+                if (event) userMovedView.current = true; // null for programmatic moves
+              }}
               nodesDraggable={!readOnly}
               nodesConnectable={!readOnly}
               elementsSelectable
               deleteKeyCode={readOnly ? null : ['Backspace', 'Delete']}
               defaultEdgeOptions={{ markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16 }, type: 'smoothstep' }}
               fitView
-              fitViewOptions={{ padding: 0.2, maxZoom: 1.1 }}
+              fitViewOptions={FIT}
               minZoom={0.2}
               proOptions={{ hideAttribution: !!props.hideAttribution }}
             >

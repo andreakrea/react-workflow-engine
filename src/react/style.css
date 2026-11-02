@@ -482,6 +482,9 @@
 }
 .vwe-group { display: flex; flex-direction: column; gap: 12px; padding-top: 14px; border-top: 1px solid var(--vwe-border); }
 .vwe-group__title { padding: 0; color: var(--vwe-text); font-size: 13px; font-weight: 600; }
+/* A <legend> normally sits on the fieldset's top border; float it into the flow instead. */
+.vwe-root fieldset.vwe-group > legend { float: left; width: 100%; }
+.vwe-root fieldset.vwe-group > legend + * { clear: both; }
 
 /* ── Fields ─────────────────────────────────────────────────────────────── */
 .vwe-field { display: flex; flex-direction: column; gap: 6px; }
