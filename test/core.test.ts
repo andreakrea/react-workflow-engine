@@ -1,23 +1,22 @@
 import { createHmac } from 'node:crypto';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { ed25519 } from '@noble/curves/ed25519';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   checkLicense,
   createEngine,
   defineBlocks,
   defineHooks,
   memoryStores,
+  memoryWorkflowStore,
   v,
   validateLicense,
   validateWorkflow,
   type Workflow,
 } from '../src';
-import { hmacSha256Hex } from '../src/core/license';
+import { _resetLicenseForTests } from '../src/core/license';
+import { activateTestLicense, LEGACY_KEY, signKey, TEST_PUBLIC_KEY } from './helpers';
 
-import { DEMO_KEY } from './helpers';
-
-beforeAll(() => {
-  validateLicense(DEMO_KEY);
-});
+beforeAll(() => activateTestLicense());
 
 const blocks = defineBlocks({
   start: { kind: 'start', label: 'Start' },
@@ -55,18 +54,42 @@ function setup(workflow: Workflow = approvalFlow(), extra: Partial<Parameters<ty
 }
 
 describe('license', () => {
-  it('accepts keys minted by the 1.x generator (same HMAC)', () => {
-    const payload = Buffer.from(JSON.stringify({ org: 'Acme', plan: 'pro' })).toString('base64');
-    const sig = createHmac('sha256', 'vise-wfe-2026').update(payload).digest('hex').slice(0, 16);
-    expect(checkLicense(`${payload}.${sig}`)).toMatchObject({ valid: true, org: 'Acme', plan: 'pro' });
-    expect(checkLicense(DEMO_KEY)).toMatchObject({ valid: true, org: 'Demo' });
-    expect(checkLicense(`${payload}.0000000000000000`).valid).toBe(false);
+  it('accepts Ed25519 keys signed with the private key, rejects tampered or foreign ones', () => {
+    _resetLicenseForTests(TEST_PUBLIC_KEY);
+    const key = signKey({ org: 'Acme', plan: 'pro' });
+    expect(checkLicense(key)).toMatchObject({ valid: true, org: 'Acme', plan: 'pro' });
+    const [, payload, sig] = key.split('.');
+    const forged = Buffer.from(JSON.stringify({ org: 'Acme', plan: 'enterprise' })).toString('base64url');
+    expect(checkLicense(`vwe2.${forged}.${sig}`).valid).toBe(false);
+    expect(checkLicense(signKey({ org: 'Mallory' }, ed25519.utils.randomPrivateKey())).valid).toBe(false);
+    expect(checkLicense(signKey({ org: 'Old', exp: Date.now() - 1000 }))).toMatchObject({ valid: false, error: expect.stringMatching(/expired/) });
+    expect(checkLicense(`vwe2.${payload}`).valid).toBe(false);
+    activateTestLicense();
   });
 
-  it('pure SHA-256 matches node:crypto', () => {
-    for (const msg of ['', 'abc', 'x'.repeat(55), 'y'.repeat(56), 'z'.repeat(64), 'é€😀'.repeat(40)]) {
-      expect(hmacSha256Hex('k', msg)).toBe(createHmac('sha256', 'k').update(msg).digest('hex'));
-    }
+  it('still accepts 1.x keys, flagged as legacy, with a one-time warning', () => {
+    const payload = Buffer.from(JSON.stringify({ org: 'Old Co', plan: 'pro' })).toString('base64');
+    const sig = createHmac('sha256', 'vise-wfe-2026').update(payload).digest('hex').slice(0, 16);
+    expect(checkLicense(`${payload}.${sig}`)).toMatchObject({ valid: true, org: 'Old Co', legacy: true });
+    expect(checkLicense(`${payload}.0000000000000000`).valid).toBe(false);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    _resetLicenseForTests(TEST_PUBLIC_KEY);
+    validateLicense(LEGACY_KEY);
+    validateLicense(LEGACY_KEY);
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+    activateTestLicense();
+  });
+
+  it('memory stores need no key; real stores do', () => {
+    _resetLicenseForTests(TEST_PUBLIC_KEY);
+    expect(() => createEngine({ ...memoryStores(), logger: {} })).not.toThrow();
+    const m = memoryWorkflowStore();
+    // A store without the in-memory marker, like a database adapter.
+    const real = { workflows: { get: m.get, list: m.list, create: m.create, update: m.update, remove: m.remove }, subjects: memoryStores().subjects };
+    expect(() => createEngine({ workflows: real.workflows, subjects: memoryStores().subjects })).toThrow(/License key required/);
+    expect(() => createEngine({ ...real, licenseKey: signKey({ org: 'Acme' }) })).not.toThrow();
+    activateTestLicense();
   });
 });
 

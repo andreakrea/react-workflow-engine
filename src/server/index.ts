@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { requireLicense } from '../core/license';
+import { needsLicense, requireLicense } from '../core/license';
 import type { Scope, WorkflowStore } from '../core/types';
 import { checkShape, type ValidationIssue } from '../core/validate';
 import type { Workflow } from '../core/types';
@@ -67,9 +67,9 @@ const pick = (body: Record<string, unknown>) =>
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function createHandler<C = any>(options: HandlerOptions<C>): WorkflowHandler<C> {
-  requireLicense('createHandler', options.licenseKey);
   const { store, validate, scope, authorize, createdBy, onError } = options;
   if (!store) throw new TypeError('createHandler: `store` is required');
+  if (options.licenseKey || needsLicense(store)) requireLicense('createHandler', options.licenseKey);
   const base = (options.basePath ?? '').replace(/\/+$/, '');
   const withIssues = (workflow: Workflow) => ({ workflow, issues: validate ? validate(workflow) : [] });
 

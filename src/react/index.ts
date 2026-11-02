@@ -9,5 +9,4 @@ export { defineBlocks, defineHooks, v } from '../core/blocks';
 export type { Blocks, BlockDef, Hooks, HookDef } from '../core/blocks';
 export { validateWorkflow } from '../core/validate';
 export type { ValidationIssue } from '../core/validate';
-export { validateLicense } from '../core/license';
 export type { Workflow, WorkflowId } from '../core/types';

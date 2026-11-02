@@ -239,7 +239,7 @@ app.all('/api/workflows/*', (c) => handler(c.req.raw));
 | `title`, `headerActions` | breadcrumb before the workflow name; extra header buttons |
 | `icons` | icons by block or hook id, e.g. `{ send_email: <MailIcon /> }` — otherwise the definition's `icon` string, then the label's initial |
 | `theme` | `'light'` (default), `'dark'`, or `'system'` |
-| `readOnly`, `className`, `style`, `licenseKey` | |
+| `readOnly`, `className`, `style` | |
 
 The editor fills its parent — give the parent a height. It follows a quiet console look (white cards, zinc neutrals, black primary button); block colours appear only in each block's icon chip. Retheme it with CSS variables:
 
@@ -262,7 +262,9 @@ Click a block to add it below the selected node (and connect it), or drag it any
 
 ## License key
 
-`validateLicense(key)` once at startup (server and browser), or pass `licenseKey` to `createEngine`, `createHandler` and `<WorkflowEditor>`. Keys issued for 1.x keep working.
+Production use needs a key: call `validateLicense(key)` once at startup on the server, or pass `licenseKey` to `createEngine` / `createHandler`. Keys are Ed25519-signed (`vwe2.…`); the package only contains the public key.
+
+No key is needed for the editor, or for the engine and handler with in-memory stores (`memoryStores()`, `createLocalClient()`), so tests, demos and prototypes work out of the box. Keys issued for 1.x still work and log a warning; they stop working in 3.0, so ask for a new one.
 
 ## Upgrading from 1.x
 
@@ -283,7 +285,7 @@ Stored data is compatible: same `workflows` table and migration name, and workfl
 | `import { WorkflowEditor } from 'vise-workflow-engine/frontend'` + `apiUrl` | `from 'vise-workflow-engine/react'` + `client={createHttpClient({ baseUrl })}` |
 | `blockTypes` / `hookTypes` arrays with Tailwind `color` classes | `blocks` / `hooks` objects with CSS colours |
 
-Behaviour changes: unknown decisions throw instead of following the first edge; moving "by type" only considers reachable nodes; `start` fires `on_node_entry` hooks like any other entry.
+`<WorkflowEditor licenseKey>` is gone: the editor needs no key. Behaviour changes: unknown decisions throw instead of following the first edge; moving "by type" only considers reachable nodes; `start` fires `on_node_entry` hooks like any other entry.
 
 ## Development
 

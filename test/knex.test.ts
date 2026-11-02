@@ -1,8 +1,8 @@
 import knexFactory, { type Knex } from 'knex';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createEngine, defineBlocks, validateLicense, type WorkflowInput } from '../src';
+import { createEngine, defineBlocks, type WorkflowInput } from '../src';
 import { createWorkflowsTable, knexStores, migrationsPath } from '../src/knex';
-import { DEMO_KEY } from './helpers';
+import { activateTestLicense } from './helpers';
 
 let knex: Knex;
 
@@ -29,7 +29,7 @@ const flow: WorkflowInput = {
 };
 
 beforeAll(async () => {
-  validateLicense(DEMO_KEY);
+  activateTestLicense();
   knex = knexFactory({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
   await createWorkflowsTable(knex, { extend: (t) => t.integer('tenant_id') });
   await knex.schema.createTable('tickets', (t) => {

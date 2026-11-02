@@ -1,142 +1,110 @@
 /**
- * License key validation. Key format (unchanged since 1.x):
- *   base64(JSON{ org, plan?, exp? }) + '.' + first 16 hex chars of HMAC-SHA256(payload)
+ * License keys.
  *
- * Implemented with a small synchronous SHA-256 so the same check runs in Node
- * and in the browser without async WebCrypto (no blank first render).
- * State lives on globalThis so every entry point (core / server / react) sees it.
+ * Current format (2.x):  vwe2.<base64url JSON { org, plan?, exp? }>.<base64url Ed25519 signature>
+ * Keys are signed with a private key that never leaves the issuer (generate-key.js);
+ * the package only holds the public key, so keys cannot be forged from the source.
+ *
+ * Legacy format (1.x):   <base64 JSON>.<16 hex chars of HMAC-SHA256>
+ * Still accepted with a warning so existing installs keep working. Its secret is
+ * public, so it will stop being accepted in 3.0.
+ *
+ * What needs a key: createEngine and createHandler with real (non-memory)
+ * stores. The editor and in-memory stores (tests, demos) don't.
+ * State lives on globalThis so every entry point sees the same activation.
  */
+import { ed25519 } from '@noble/curves/ed25519';
+import { hmac } from '@noble/hashes/hmac';
+import { sha256 } from '@noble/hashes/sha256';
 
-const SIGN_KEY = 'vise-wfe-2026';
+const PUBLIC_KEY_HEX = '9b02ed94388c2f8ea461bb00ad9b53d8fa0ca593870f151647893d715b8e7507';
+const LEGACY_SECRET = 'vise-wfe-2026';
 const STATE = Symbol.for('vise-workflow-engine.license');
 
 export interface LicenseInfo {
   org: string;
   plan: string;
   exp?: number;
+  /** True for 1.x keys: still accepted, should be replaced. */
+  legacy?: boolean;
 }
 
-export type LicenseResult =
-  | ({ valid: true } & LicenseInfo)
-  | { valid: false; error: string };
+export type LicenseResult = ({ valid: true } & LicenseInfo) | { valid: false; error: string };
 
-// ─── SHA-256 / HMAC (sync, isomorphic) ────────────────────────────────────────
-
-const K = new Uint32Array([
-  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
-  0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
-  0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
-  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
-  0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
-  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
-  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-  0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
-]);
-
-function sha256(data: Uint8Array): Uint8Array {
-  const h = new Uint32Array([
-    0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
-  ]);
-  const bitLen = data.length * 8;
-  const padded = new Uint8Array(((data.length + 9 + 63) >> 6) << 6);
-  padded.set(data);
-  padded[data.length] = 0x80;
-  const view = new DataView(padded.buffer);
-  view.setUint32(padded.length - 4, bitLen >>> 0);
-  view.setUint32(padded.length - 8, Math.floor(bitLen / 0x100000000));
-
-  const w = new Uint32Array(64);
-  for (let off = 0; off < padded.length; off += 64) {
-    for (let i = 0; i < 16; i++) w[i] = view.getUint32(off + i * 4);
-    for (let i = 16; i < 64; i++) {
-      const a = w[i - 15], b = w[i - 2];
-      const s0 = ((a >>> 7) | (a << 25)) ^ ((a >>> 18) | (a << 14)) ^ (a >>> 3);
-      const s1 = ((b >>> 17) | (b << 15)) ^ ((b >>> 19) | (b << 13)) ^ (b >>> 10);
-      w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0;
-    }
-    let [a, b, c, d, e, f, g, hh] = h;
-    for (let i = 0; i < 64; i++) {
-      const S1 = ((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7));
-      const ch = (e & f) ^ (~e & g);
-      const t1 = (hh + S1 + ch + K[i] + w[i]) >>> 0;
-      const S0 = ((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10));
-      const maj = (a & b) ^ (a & c) ^ (b & c);
-      const t2 = (S0 + maj) >>> 0;
-      hh = g; g = f; f = e; e = (d + t1) >>> 0;
-      d = c; c = b; b = a; a = (t1 + t2) >>> 0;
-    }
-    h[0] += a; h[1] += b; h[2] += c; h[3] += d; h[4] += e; h[5] += f; h[6] += g; h[7] += hh;
-  }
-  const out = new Uint8Array(32);
-  const ov = new DataView(out.buffer);
-  for (let i = 0; i < 8; i++) ov.setUint32(i * 4, h[i]);
-  return out;
+interface State {
+  info: LicenseInfo | null;
+  publicKey: string;
+  warned: boolean;
 }
 
-function utf8(s: string): Uint8Array {
-  return new TextEncoder().encode(s);
+function state(): State {
+  const g = globalThis as Record<symbol, State | undefined>;
+  return (g[STATE] ??= { info: null, publicKey: PUBLIC_KEY_HEX, warned: false });
 }
 
-export function hmacSha256Hex(key: string, message: string): string {
-  let k = utf8(key);
-  if (k.length > 64) k = sha256(k);
-  const ipad = new Uint8Array(64 + 0), opad = new Uint8Array(64);
-  for (let i = 0; i < 64; i++) {
-    ipad[i] = (k[i] ?? 0) ^ 0x36;
-    opad[i] = (k[i] ?? 0) ^ 0x5c;
-  }
-  const msg = utf8(message);
-  const inner = new Uint8Array(64 + msg.length);
-  inner.set(ipad);
-  inner.set(msg, 64);
-  const innerHash = sha256(inner);
-  const outer = new Uint8Array(64 + 32);
-  outer.set(opad);
-  outer.set(innerHash, 64);
-  return Array.from(sha256(outer), (b) => b.toString(16).padStart(2, '0')).join('');
-}
+const hex = (bytes: Uint8Array) => Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+const fromHex = (h: string) => Uint8Array.from(h.match(/../g) ?? [], (b) => parseInt(b, 16));
+const utf8 = (s: string) => new TextEncoder().encode(s);
 
-function decodeBase64(s: string): string {
-  if (typeof atob === 'function') {
-    const bin = atob(s);
-    return new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0)));
-  }
+function fromBase64(s: string): Uint8Array {
+  const b64 = s.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(s.length / 4) * 4, '=');
+  if (typeof atob === 'function') return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return (globalThis as any).Buffer.from(s, 'base64').toString('utf8');
+  return new Uint8Array((globalThis as any).Buffer.from(b64, 'base64'));
 }
 
-// ─── Public API ───────────────────────────────────────────────────────────────
-
-function state(): { info: LicenseInfo | null } {
-  const g = globalThis as Record<symbol, { info: LicenseInfo | null } | undefined>;
-  return (g[STATE] ??= { info: null });
+function parsePayload(b64: string): { org?: string; plan?: string; exp?: number } | null {
+  try {
+    return JSON.parse(new TextDecoder().decode(fromBase64(b64)));
+  } catch {
+    return null;
+  }
 }
 
 /** Checks a key without activating it. */
 export function checkLicense(key: string | undefined | null): LicenseResult {
   if (!key || typeof key !== 'string') return { valid: false, error: 'License key is required' };
   const parts = key.trim().split('.');
-  if (parts.length !== 2) return { valid: false, error: 'Invalid key format' };
-  const [payload, signature] = parts;
-  if (hmacSha256Hex(SIGN_KEY, payload).slice(0, 16) !== signature) {
-    return { valid: false, error: 'Invalid license key' };
+  let data: { org?: string; plan?: string; exp?: number } | null;
+  let legacy = false;
+
+  if (parts.length === 3 && parts[0] === 'vwe2') {
+    let ok = false;
+    try {
+      ok = ed25519.verify(fromBase64(parts[2]), utf8(parts[1]), fromHex(state().publicKey));
+    } catch {
+      ok = false;
+    }
+    if (!ok) return { valid: false, error: 'Invalid license key' };
+    data = parsePayload(parts[1]);
+  } else if (parts.length === 2) {
+    if (hex(hmac(sha256, utf8(LEGACY_SECRET), utf8(parts[0]))).slice(0, 16) !== parts[1]) {
+      return { valid: false, error: 'Invalid license key' };
+    }
+    data = parsePayload(parts[0]);
+    legacy = true;
+  } else {
+    return { valid: false, error: 'Invalid key format' };
   }
-  let data: { org?: string; plan?: string; exp?: number };
-  try {
-    data = JSON.parse(decodeBase64(payload));
-  } catch {
-    return { valid: false, error: 'Corrupted key data' };
-  }
+
+  if (!data) return { valid: false, error: 'Corrupted key data' };
   if (data.exp && Date.now() > data.exp) {
     return { valid: false, error: `License expired on ${new Date(data.exp).toISOString().slice(0, 10)}` };
   }
-  return { valid: true, org: data.org ?? '', plan: data.plan ?? 'standard', exp: data.exp };
+  return { valid: true, org: data.org ?? '', plan: data.plan ?? 'standard', exp: data.exp, ...(legacy ? { legacy } : {}) };
 }
 
-/** Validates and activates a key for this process / page. Safe to call more than once. */
+/** Validates and activates a key for this process. Safe to call more than once. */
 export function validateLicense(key: string | undefined | null): LicenseResult {
   const result = checkLicense(key);
-  if (result.valid) state().info = { org: result.org, plan: result.plan, exp: result.exp };
+  if (result.valid) {
+    const { valid: _v, ...info } = result;
+    state().info = info;
+    if (info.legacy && !state().warned) {
+      state().warned = true;
+      console.warn('vise-workflow-engine: this is a 1.x license key. It still works, but ask for a new key: 1.x keys stop working in 3.0.');
+    }
+  }
   return result;
 }
 
@@ -157,8 +125,19 @@ export function requireLicense(caller: string, key?: string | null): void {
 
 function licenseError(caller: string, reason: string): Error {
   const err = new Error(
-    `vise-workflow-engine: ${reason}. Pass { licenseKey } to ${caller} or call validateLicense(key) once at startup.`,
+    `vise-workflow-engine: ${reason}. Pass { licenseKey } to ${caller} or call validateLicense(key) once at startup. ` +
+      `(In-memory stores for tests and demos need no key.)`,
   );
-  (err as Error & { code: string }).code = 'LICENSE';
+  Object.assign(err, { name: 'WorkflowError', code: 'LICENSE' });
   return err;
 }
+
+/** @internal Test hook: trust another public key and clear the activation. */
+export function _resetLicenseForTests(publicKeyHex?: string): void {
+  Object.assign(state(), { info: null, warned: false, publicKey: publicKeyHex ?? PUBLIC_KEY_HEX });
+}
+
+/** Marks stores that need no license (in-memory ones). */
+export const NO_LICENSE = Symbol.for('vise-workflow-engine.no-license');
+export const needsLicense = (...stores: unknown[]) =>
+  !stores.every((s) => !!s && typeof s === 'object' && (s as Record<symbol, unknown>)[NO_LICENSE] === true);

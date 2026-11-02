@@ -14,7 +14,6 @@ import ReactFlow, {
   type Edge,
 } from 'reactflow';
 import type { Blocks, Hooks } from '../core/blocks';
-import { checkLicense, getLicenseInfo } from '../core/license';
 import type { Workflow, WorkflowHook, WorkflowId, WorkflowInput } from '../core/types';
 import { validateWorkflow, type ValidationIssue } from '../core/validate';
 import type { WorkflowClient } from './client';
@@ -59,7 +58,6 @@ export interface WorkflowEditorProps<Id extends WorkflowId = WorkflowId> {
   /** 'light' (default), 'dark', or 'system' to follow prefers-color-scheme. */
   theme?: 'light' | 'dark' | 'system';
   readOnly?: boolean;
-  licenseKey?: string;
   className?: string;
   style?: CSSProperties;
 }
@@ -567,17 +565,6 @@ function Editor(props: WorkflowEditorProps) {
  *   </div>
  */
 export function WorkflowEditor<Id extends WorkflowId = WorkflowId>(props: WorkflowEditorProps<Id>) {
-  const license = props.licenseKey ? checkLicense(props.licenseKey) : getLicenseInfo() ? { valid: true as const } : checkLicense(undefined);
-  if (!license.valid) {
-    return (
-      <div className={`vwe-root vwe-locked${props.className ? ` ${props.className}` : ''}`} data-theme={props.theme ?? 'light'} style={props.style}>
-        <div>
-          <strong>Workflow editor unavailable</strong>
-          <p>{license.error}. Pass a valid <code>licenseKey</code> to WorkflowEditor.</p>
-        </div>
-      </div>
-    );
-  }
   return (
     <ReactFlowProvider>
       <Editor {...(props as unknown as WorkflowEditorProps)} />

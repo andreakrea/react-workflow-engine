@@ -1,11 +1,11 @@
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createEngine, defineBlocks, memoryStores, validateLicense } from '../src';
+import { createEngine, defineBlocks, memoryStores } from '../src';
 import { createHandler, toNodeHandler } from '../src/server';
-import { DEMO_KEY } from './helpers';
+import { activateTestLicense } from './helpers';
 
-beforeAll(() => validateLicense(DEMO_KEY));
+beforeAll(() => activateTestLicense());
 
 const blocks = defineBlocks({
   start: { kind: 'start', label: 'Start' },

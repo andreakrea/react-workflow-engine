@@ -69,6 +69,10 @@ Stored workflow: `{ id, name, description, nodes: [{ id, position, data: { type,
 
 `GET /` `{ workflows }` · `GET /:id` `{ workflow, issues }` · `POST /` 201 · `PUT|PATCH /:id` · `DELETE /:id` 204 · errors `{ error: { code, message, details? } }`. Next.js/Hono/Bun: `createHandler({ store, basePath: '/api/workflows' })` and use it as a fetch handler.
 
+## License
+
+Server only: `validateLicense(process.env.WORKFLOW_ENGINE_KEY)` before createEngine/createHandler with real stores. The editor and memory stores need no key.
+
 ## Testing
 
 `memoryStores({ workflows, subjects })` gives in-memory stores; `createLocalClient()` gives an editor client backed by localStorage.

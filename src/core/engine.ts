@@ -1,7 +1,7 @@
 import { getBranches, type Blocks, type BranchIds, type Hooks, type InferVariables, type VariableSpecs } from './blocks';
 import { WorkflowError, isWorkflowError } from './errors';
 import { blockOf, findStartNode, getNode, isTerminal, outgoing, resolveMove, type Move, type Step } from './graph';
-import { requireLicense } from './license';
+import { needsLicense, requireLicense } from './license';
 import type {
   HookTrigger,
   Logger,
@@ -144,10 +144,10 @@ export interface Engine<B extends Blocks = Blocks, S extends Subject = Subject> 
 export function createEngine<const B extends Blocks, const H extends Hooks, S extends Subject>(
   options: EngineOptions<B, H, S>,
 ): Engine<B, S> {
-  requireLicense('createEngine', options.licenseKey);
   const { workflows, subjects, transaction, blocks, hooks: hookDefs, maxSteps = 100 } = options;
   if (!workflows) throw new TypeError('createEngine: `workflows` store is required');
   if (!subjects) throw new TypeError('createEngine: `subjects` store is required');
+  if (options.licenseKey || needsLicense(workflows, subjects)) requireLicense('createEngine', options.licenseKey);
 
   const actions = (options.actions ?? {}) as Record<string, (ctx: ActionContext) => Awaitable<ActionResult>>;
   const hookHandlers = (options.hookHandlers ?? {}) as Record<string, (ctx: HookContext) => Awaitable<unknown>>;

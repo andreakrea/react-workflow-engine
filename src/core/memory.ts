@@ -1,9 +1,11 @@
+import { NO_LICENSE } from './license';
 import type { Scope, Subject, SubjectStore, Workflow, WorkflowId, WorkflowInput, WorkflowStore } from './types';
 
 const clone = <T>(x: T): T => (typeof structuredClone === 'function' ? structuredClone(x) : JSON.parse(JSON.stringify(x)));
 const inScope = (row: Record<string, unknown>, scope?: Scope) => !scope || Object.entries(scope).every(([k, v]) => row[k] === v);
 
 export interface MemoryWorkflowStore extends WorkflowStore {
+  readonly [NO_LICENSE]: true;
   /** Current contents (cloned). */
   all(): Workflow[];
 }
@@ -19,6 +21,7 @@ export function memoryWorkflowStore(initial: Workflow[] = [], opts: { onChange?:
   const find = (id: WorkflowId, scope?: Scope) => rows.find((w) => String(w.id) === String(id) && inScope(w, scope));
 
   return {
+    [NO_LICENSE]: true,
     all: () => clone(rows),
     async get(id, scope) {
       const w = find(id, scope);
@@ -52,6 +55,7 @@ export function memoryWorkflowStore(initial: Workflow[] = [], opts: { onChange?:
 }
 
 export interface MemorySubjectStore<S extends Subject = Subject> extends SubjectStore<S> {
+  readonly [NO_LICENSE]: true;
   add(subject: Partial<S> & { id: S['id'] }): S;
   all(): S[];
 }
@@ -65,6 +69,7 @@ export function memorySubjectStore<S extends Subject = Subject>(initial: Array<P
   };
   initial.forEach(add);
   return {
+    [NO_LICENSE]: true,
     add,
     all: () => clone([...rows.values()]),
     async get(id) {

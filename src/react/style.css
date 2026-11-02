@@ -658,8 +658,6 @@ textarea.vwe-input { resize: vertical; line-height: 1.45; }
   pointer-events: none;
 }
 .vwe-empty strong { color: var(--vwe-text); font-weight: 600; }
-.vwe-locked { display: grid; place-items: center; padding: 24px; text-align: center; }
-.vwe-locked strong { color: var(--vwe-text); }
 
 @media (prefers-reduced-motion: reduce) {
   .vwe-root *, .vwe-root *::before, .vwe-root *::after { transition: none !important; animation: none !important; }
