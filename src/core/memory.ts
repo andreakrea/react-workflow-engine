@@ -1,5 +1,5 @@
 import { NO_LICENSE } from './license';
-import type { HistoryEntry, HistoryStore, Scope, Subject, SubjectStore, Workflow, WorkflowId, WorkflowInput, WorkflowStore } from './types';
+import type { HistoryEntry, HistoryStore, Timer, TimerStore, Scope, Subject, SubjectStore, Workflow, WorkflowId, WorkflowInput, WorkflowStore } from './types';
 
 const clone = <T>(x: T): T => (typeof structuredClone === 'function' ? structuredClone(x) : JSON.parse(JSON.stringify(x)));
 const inScope = (row: Record<string, unknown>, scope?: Scope) => !scope || Object.entries(scope).every(([k, v]) => row[k] === v);
@@ -99,6 +99,29 @@ export function memoryHistoryStore(): HistoryStore & { readonly [NO_LICENSE]: tr
   };
 }
 
+export function memoryTimerStore(): TimerStore & { readonly [NO_LICENSE]: true } {
+  let rows: Timer[] = [];
+  let id = 1;
+  return {
+    [NO_LICENSE]: true,
+    async add(timer) {
+      rows.push({ ...clone(timer), id: id++ });
+    },
+    async claimDue(now) {
+      const due = rows.filter((t) => t.dueAt <= now.toISOString()).sort((a, b) => a.dueAt.localeCompare(b.dueAt))[0];
+      if (!due) return null;
+      rows = rows.filter((t) => t !== due);
+      return clone(due);
+    },
+    async clear(subjectId) {
+      rows = rows.filter((t) => String(t.subjectId) !== String(subjectId));
+    },
+    async list(subjectId) {
+      return clone(rows.filter((t) => String(t.subjectId) === String(subjectId)));
+    },
+  };
+}
+
 export function memoryStores<S extends Subject = Subject>(opts: { workflows?: Workflow[]; subjects?: Array<Partial<S> & { id: S['id'] }> } = {}) {
-  return { workflows: memoryWorkflowStore(opts.workflows), subjects: memorySubjectStore<S>(opts.subjects), history: memoryHistoryStore() };
+  return { workflows: memoryWorkflowStore(opts.workflows), subjects: memorySubjectStore<S>(opts.subjects), history: memoryHistoryStore(), timers: memoryTimerStore() };
 }

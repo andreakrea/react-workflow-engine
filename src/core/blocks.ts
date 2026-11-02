@@ -69,6 +69,15 @@ export interface BranchDef {
   color?: string;
 }
 
+export interface RetryPolicy {
+  /** Total runs including the first. */
+  attempts: number;
+  /** Delay before the first retry: ms or '30s', '5m', … Default '30s'. */
+  delay?: number | string;
+  /** Multiplier per further retry. Default 2. */
+  backoff?: number;
+}
+
 export interface BlockDef {
   kind: BlockKind;
   label: string;
@@ -79,6 +88,8 @@ export interface BlockDef {
   variables?: VariableSpecs;
   /** Decision outputs. Defaults to ['yes', 'no']. */
   branches?: readonly (string | BranchDef)[];
+  /** Retry the action when it throws (needs a timers store). */
+  retry?: RetryPolicy;
 }
 
 export interface HookDef {

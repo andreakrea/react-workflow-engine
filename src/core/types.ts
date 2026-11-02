@@ -124,6 +124,31 @@ export interface HistoryStore {
   list(subjectId: Subject['id'], opts?: { limit?: number }): Promise<HistoryEntry[]>;
 }
 
+/** A scheduled continuation: resume after a wait, or retry a failed action. */
+export interface Timer {
+  id?: string | number;
+  subjectId: Subject['id'];
+  workflowId: WorkflowId;
+  /** The node the subject must still be on when the timer fires; otherwise it is dropped. */
+  nodeId: string;
+  kind: 'resume' | 'retry';
+  /** ISO time. */
+  dueAt: string;
+  /** resume: the move to make ({ next: true } by default). */
+  move: { next: true } | { branch: string | boolean } | { to: string } | null;
+  /** retry: the attempt number of the next run. */
+  attempt: number;
+}
+
+export interface TimerStore {
+  add(timer: Timer, tx?: unknown): Promise<void>;
+  /** Remove and return the earliest timer due at `now` (lock it when in a transaction), or null. */
+  claimDue(now: Date, tx?: unknown): Promise<Timer | null>;
+  /** Drop a subject's pending timers (the engine calls this whenever the subject moves). */
+  clear(subjectId: Subject['id'], tx?: unknown): Promise<void>;
+  list(subjectId: Subject['id']): Promise<Timer[]>;
+}
+
 export type TransactionRunner = <T>(fn: (tx: unknown) => Promise<T>) => Promise<T>;
 
 export interface Logger {

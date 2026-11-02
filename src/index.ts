@@ -23,6 +23,7 @@ export type {
   Blocks,
   BranchDef,
   BranchIds,
+  RetryPolicy,
   HookDef,
   Hooks,
   InferVariables,
@@ -40,7 +41,8 @@ export type { ValidationIssue, ValidateOptions } from './core/validate';
 export { WorkflowError, isWorkflowError } from './core/errors';
 export type { WorkflowErrorCode } from './core/errors';
 
-export { memoryStores, memoryWorkflowStore, memorySubjectStore, memoryHistoryStore } from './core/memory';
+export { memoryStores, memoryWorkflowStore, memorySubjectStore, memoryHistoryStore, memoryTimerStore } from './core/memory';
+export { toMs, resolveUntil } from './core/time';
 export type { MemorySubjectStore, MemoryWorkflowStore } from './core/memory';
 
 export { validateLicense, checkLicense, getLicenseInfo } from './core/license';

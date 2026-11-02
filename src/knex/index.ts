@@ -7,6 +7,8 @@ import type {
   Scope,
   Subject,
   SubjectStore,
+  Timer,
+  TimerStore,
   TransactionRunner,
   Workflow,
   WorkflowId,
@@ -196,6 +198,71 @@ export async function createWorkflowHistoryTable(knex: Knex, opts: { table?: str
   });
 }
 
+// ─── Timers ───────────────────────────────────────────────────────────────────
+
+/**
+ * Pending waits and retries in `workflow_timers` (bundled migration 003, or
+ * createWorkflowTimersTable). On Postgres and MySQL 8 a claimed timer is locked
+ * with SKIP LOCKED, so several workers can call engine.runDue() at once.
+ */
+export function knexTimerStore(knex: Knex, opts: { table?: string } = {}): TimerStore {
+  const table = opts.table ?? 'workflow_timers';
+  const client = String(knex.client?.config?.client ?? '');
+  const canSkipLocked = /pg|postgres|mysql/.test(client);
+  const toTimer = (r: Record<string, any>): Timer => ({
+    id: r.id,
+    subjectId: r.subject_id,
+    workflowId: r.workflow_id,
+    nodeId: r.node_id,
+    kind: r.kind,
+    dueAt: new Date(r.due_at).toISOString(),
+    move: r.move ? JSON.parse(r.move) : null,
+    attempt: Number(r.attempt),
+  });
+  return {
+    async add(t, tx) {
+      await db(knex, tx)(table).insert({
+        subject_id: String(t.subjectId),
+        workflow_id: String(t.workflowId),
+        node_id: t.nodeId,
+        kind: t.kind,
+        due_at: new Date(t.dueAt),
+        move: t.move ? JSON.stringify(t.move) : null,
+        attempt: t.attempt,
+      });
+    },
+    async claimDue(now, tx) {
+      const q = db(knex, tx)(table).where('due_at', '<=', now).orderBy('due_at').first();
+      const row = await (tx && canSkipLocked ? q.forUpdate().skipLocked() : q);
+      if (!row) return null;
+      const deleted = await db(knex, tx)(table).where({ id: row.id }).del();
+      return deleted ? toTimer(row) : null;
+    },
+    async clear(subjectId, tx) {
+      await db(knex, tx)(table).where({ subject_id: String(subjectId) }).del();
+    },
+    async list(subjectId) {
+      const rows = await knex(table).where({ subject_id: String(subjectId) }).orderBy('due_at');
+      return rows.map(toTimer);
+    },
+  };
+}
+
+export async function createWorkflowTimersTable(knex: Knex, opts: { table?: string } = {}) {
+  await knex.schema.createTable(opts.table ?? 'workflow_timers', (t) => {
+    t.bigIncrements('id').primary();
+    t.string('subject_id').notNullable();
+    t.string('workflow_id').notNullable();
+    t.string('node_id').notNullable();
+    t.string('kind', 16).notNullable();
+    t.timestamp('due_at', { useTz: true }).notNullable();
+    t.text('move');
+    t.integer('attempt').notNullable().defaultTo(1);
+    t.index(['due_at']);
+    t.index(['subject_id']);
+  });
+}
+
 export function knexTransaction(knex: Knex): TransactionRunner {
   return (fn) => knex.transaction((trx) => fn(trx));
 }
@@ -212,13 +279,16 @@ export function knexStores<S extends Subject = Subject>(
     subjects: KnexSubjectStoreOptions<S>;
     /** Record every move in workflow_history (run migration 002 first). */
     history?: boolean | { table?: string };
+    /** Enable waits and retries via workflow_timers (run migration 003 first). */
+    timers?: boolean | { table?: string };
     transaction?: boolean;
   },
-): { workflows: WorkflowStore; subjects: SubjectStore<S>; history?: HistoryStore; transaction?: TransactionRunner } {
+): { workflows: WorkflowStore; subjects: SubjectStore<S>; history?: HistoryStore; timers?: TimerStore; transaction?: TransactionRunner } {
   return {
     workflows: knexWorkflowStore(knex, opts.workflows),
     subjects: knexSubjectStore<S>(knex, opts.subjects),
     history: opts.history ? knexHistoryStore(knex, opts.history === true ? {} : opts.history) : undefined,
+    timers: opts.timers ? knexTimerStore(knex, opts.timers === true ? {} : opts.timers) : undefined,
     transaction: opts.transaction === false ? undefined : knexTransaction(knex),
   };
 }

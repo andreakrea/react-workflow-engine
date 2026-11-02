@@ -3,6 +3,7 @@ import {
   createEngine,
   isWorkflowError,
   memoryHistoryStore,
+  memoryTimerStore,
   memorySubjectStore,
   memoryWorkflowStore,
   type HistoryEntry,
@@ -44,6 +45,7 @@ export default function Simulator({ client, initialWorkflowId }: { client: Workf
       workflows: memoryWorkflowStore(workflows),
       subjects,
       history: memoryHistoryStore(),
+      timers: memoryTimerStore(),
       blocks,
       hooks,
       actions: {
@@ -55,6 +57,11 @@ export default function Simulator({ client, initialWorkflowId }: { client: Workf
         route_priority: ({ subject }) => {
           push('action', `#${subject.id} routed as ${subject.priority}`);
           return { branch: subject.priority };
+        },
+        wait_for_reply: ({ subject, variables, input }) => {
+          if (input.timer) return { next: true };
+          push('action', `#${subject.id} waits ${variables.duration} for a reply`);
+          return { wait: variables.duration };
         },
         send_email: ({ subject, variables }) => {
           push('action', `#${subject.id} emailed ${variables.to} with template “${variables.template}”`);
@@ -78,6 +85,19 @@ export default function Simulator({ client, initialWorkflowId }: { client: Workf
   useEffect(() => {
     setTickets([]);
     setOptions({});
+  }, [engine]);
+
+  // Fire due waits every second, and refresh the ticket a timer moved.
+  useEffect(() => {
+    const stop = engine.startTimers({ intervalMs: 1000 });
+    const off = engine.on('transitioned', (e) => {
+      if (e.actor === null) void refresh(Number(e.subjectId));
+    });
+    return () => {
+      stop();
+      off();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [engine]);
 
   const refresh = async (id: number) => {

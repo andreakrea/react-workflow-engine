@@ -135,8 +135,38 @@ An action runs when a subject enters a node of its block. Its return value decid
 | `{ next: true }` | follow the only outgoing edge |
 | `{ branch: 'id' }` | decision: follow that branch (typed to the block's branches) |
 | `{ to: 'nodeOrBlockId' }` | go to a specific next node |
+| `{ wait: '3d', then? }` | stay, and continue by itself later (see below) |
 
-Context: `{ subject, node, variables, workflow, input, tx }`. `variables` holds this node's values from the editor, typed from the block's `variables`.
+Context: `{ subject, node, variables, workflow, input, actor, attempt, tx }`. `variables` holds this node's values from the editor, typed from the block's `variables`.
+
+### Waits and retries
+
+An action can pause the subject and continue later, and a block can retry its action when it fails:
+
+```ts
+const blocks = defineBlocks({
+  wait_for_reply: { kind: 'step', label: 'Wait for reply', variables: { duration: v.string({ default: '3d' }) } },
+  send_invoice: { kind: 'step', label: 'Send invoice', retry: { attempts: 5, delay: '1m', backoff: 2 } }, // 1m, 2m, 4m, 8m
+});
+
+const engine = createEngine({
+  ...knexStores(knex, { subjects: { table: 'tickets' }, timers: true, history: true }),
+  blocks,
+  actions: {
+    // input.timer is set when the timer fires
+    wait_for_reply: ({ variables, input }) => (input.timer ? { next: true } : { wait: variables.duration }),
+    send_invoice: async ({ subject, attempt }) => { await billing.send(subject.id); return { next: true }; },
+  },
+});
+
+engine.startTimers({ intervalMs: 5000 });   // or call engine.runDue() from a cron job / queue worker
+```
+
+- `wait` takes a duration (`'90s'`, `'15m'`, `'2h'`, `'3d'`, `'1w'`, milliseconds), a `Date` or an ISO date; `then` is the move to make when it fires (default `{ next: true }`).
+- A failing action with a `retry` policy (on the block, or `retry` on `createEngine` for all) is scheduled again instead of failing the move; the subject stays on the node and `attempt` counts up. After the last attempt the error is reported through the `timerError` event.
+- Timers belong to the node visit: if the subject moves (e.g. an agent acts first), its pending timers are dropped.
+- Each due timer is claimed and removed in its own transaction (`SELECT … FOR UPDATE SKIP LOCKED` on Postgres/MySQL), so several app instances can run `runDue()` safely. Timers fire at most once.
+- `engine.get(id).timers` lists what a subject is waiting for. Tables: migration 003, or `createWorkflowTimersTable(knex)`.
 
 ### Order of events per step
 
@@ -169,7 +199,7 @@ History needs a store: `knexStores(knex, { subjects, history: true })` (table fr
 ```ts
 engine.on('transitioned', ({ subjectId, from, to, branch }) => audit.log(...));
 engine.on('completed', ({ subjectId, nodeId }) => ...);
-engine.on('actionError' | 'hookError' | 'hookExecuted', ...);
+engine.on('actionError' | 'hookError' | 'hookExecuted' | 'scheduled' | 'timerError', ...);
 ```
 
 ### Validation

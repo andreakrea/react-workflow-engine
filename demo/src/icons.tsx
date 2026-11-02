@@ -15,6 +15,7 @@ export const icons: Record<string, ReactNode> = {
   send_email: icon(<><rect x="2" y="3.5" width="12" height="9" rx="1.5" /><path d="M2.5 4.5L8 9l5.5-4.5" /></>),
   needs_approval: icon(<><path d="M8 2l5 2v4c0 3-2.2 5-5 6-2.8-1-5-3-5-6V4z" /><path d="M5.8 8l1.6 1.6L10.4 6.6" /></>),
   escalate_or_close: icon(<><path d="M8 13V3M4.5 6.5L8 3l3.5 3.5" /></>),
+  wait_for_reply: icon(<><circle cx="8" cy="8" r="5.5" /><path d="M8 5v3l2 1.5" /></>),
   resolved: icon(<><circle cx="8" cy="8" r="5.5" /><path d="M5.6 8.1l1.7 1.7 3.2-3.4" /></>),
   rejected: icon(<><circle cx="8" cy="8" r="5.5" /><path d="M6 6l4 4M10 6l-4 4" /></>),
   send_slack_alert: icon(<path d="M3 3.5h10v7H7l-3 2.5v-2.5H3z" />),

@@ -339,3 +339,88 @@ describe('history and get()', () => {
     expect(await engine.get(1)).toMatchObject({ node: { id: 'n1', label: 'Start' }, status: 'waiting', next: [{ nodeId: 'n2' }] });
   });
 });
+
+describe('waits and retries', () => {
+  const later = (ms: number) => new Date(Date.now() + ms);
+  const waitBlocks = defineBlocks({
+    start: { kind: 'start', label: 'Start' },
+    cooldown: { kind: 'step', label: 'Wait', variables: { hours: v.number({ default: 24 }) } },
+    remind: { kind: 'step', label: 'Remind', retry: { attempts: 3, delay: '1m', backoff: 2 } },
+    flaky: { kind: 'step', label: 'Flaky' },
+    done: { kind: 'end', label: 'Done' },
+  });
+  const flow = (middle: string): Workflow => ({
+    id: 1, name: 'w', hooks: [],
+    nodes: [node('a', 'start'), node('b', middle, middle === 'cooldown' ? { hours: 2 } : {}), node('c', 'done')],
+    edges: [edge('a', 'b'), edge('b', 'c')],
+  });
+
+  it('waits, then continues when the timer is due', async () => {
+    const stores = memoryStores({ workflows: [flow('cooldown')], subjects: [{ id: 1 }] });
+    const engine = createEngine({
+      ...stores, blocks: waitBlocks, logger: {},
+      actions: { start: () => ({ next: true }), cooldown: ({ variables, input }) => (input.timer ? undefined : { wait: `${variables.hours}h` }) },
+    });
+    const r = await engine.start(1, 1);
+    expect(r).toMatchObject({ node: { id: 'b' }, status: 'waiting', wait: { kind: 'resume' } });
+    expect(new Date(r.wait!.until).getTime()).toBeGreaterThan(Date.now() + 2 * 3600e3 - 5000);
+    expect((await engine.get(1)).timers).toHaveLength(1);
+    expect(await engine.runDue({ now: later(3600e3) })).toEqual({ processed: 0, failed: 0 });
+    expect(await engine.runDue({ now: later(3 * 3600e3) })).toEqual({ processed: 1, failed: 0 });
+    expect(await engine.get(1)).toMatchObject({ node: { id: 'c' }, status: 'completed', timers: [] });
+  });
+
+  it('drops a timer when the subject moved on before it fired', async () => {
+    const stores = memoryStores({ workflows: [flow('cooldown')], subjects: [{ id: 1 }] });
+    const engine = createEngine({ ...stores, blocks: waitBlocks, logger: {}, actions: { start: () => ({ next: true }), cooldown: () => ({ wait: '1h' }) } });
+    await engine.start(1, 1);
+    await engine.move(1, { next: true });
+    expect((await engine.get(1)).timers).toEqual([]);
+    expect(await engine.runDue({ now: later(2 * 3600e3) })).toEqual({ processed: 0, failed: 0 });
+  });
+
+  it('retries a failing action with backoff, then succeeds', async () => {
+    let calls = 0;
+    const attempts: number[] = [];
+    const stores = memoryStores({ workflows: [flow('remind')], subjects: [{ id: 1 }] });
+    const engine = createEngine({
+      ...stores, blocks: waitBlocks, logger: {},
+      actions: {
+        start: () => ({ next: true }),
+        remind: ({ attempt }) => {
+          attempts.push(attempt);
+          if (++calls < 3) throw new Error('smtp down');
+          return { next: true };
+        },
+      },
+    });
+    const r = await engine.start(1, 1);
+    expect(r).toMatchObject({ status: 'waiting', wait: { kind: 'retry', attempt: 2 } });
+    expect(await engine.runDue({ now: later(30e3) })).toEqual({ processed: 0, failed: 0 });
+    await engine.runDue({ now: later(61e3) });
+    const second = (await engine.get(1)).timers[0];
+    expect(second).toMatchObject({ kind: 'retry', attempt: 3 });
+    expect(new Date(second.dueAt).getTime() - Date.now()).toBeGreaterThan(110e3);
+    await engine.runDue({ now: later(10 * 60e3) });
+    expect(attempts).toEqual([1, 2, 3]);
+    expect(await engine.get(1)).toMatchObject({ node: { id: 'c' }, status: 'completed' });
+  });
+
+  it('gives up after the last attempt and reports it', async () => {
+    const stores = memoryStores({ workflows: [flow('remind')], subjects: [{ id: 1 }] });
+    const errors: unknown[] = [];
+    const engine = createEngine({ ...stores, blocks: waitBlocks, logger: {}, actions: { start: () => ({ next: true }), remind: () => { throw new Error('down'); } } });
+    engine.on('timerError', (e) => errors.push(e.error));
+    await engine.start(1, 1);
+    await engine.runDue({ now: later(60e3 + 1) });
+    expect(await engine.runDue({ now: later(10 * 60e3) })).toEqual({ processed: 0, failed: 1 });
+    expect(errors[0]).toMatchObject({ code: 'ACTION_FAILED', details: { attempt: 3 } });
+    expect(await engine.get(1)).toMatchObject({ node: { id: 'b' }, timers: [] });
+  });
+
+  it('without a retry policy failures still throw, and wait needs a timers store', async () => {
+    const { timers: _t, ...noTimers } = memoryStores({ workflows: [flow('flaky')], subjects: [{ id: 1 }] });
+    const engine = createEngine({ ...noTimers, blocks: waitBlocks, logger: {}, actions: { start: () => ({ next: true }), flaky: () => ({ wait: '1h' }) } });
+    await expect(engine.start(1, 1)).rejects.toThrow(/no timers store/);
+  });
+});

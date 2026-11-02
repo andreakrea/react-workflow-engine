@@ -1,12 +1,15 @@
-import { getBranches, type Blocks, type BranchIds, type Hooks, type InferVariables, type VariableSpecs } from './blocks';
+import { getBranches, type RetryPolicy, type Blocks, type BranchIds, type Hooks, type InferVariables, type VariableSpecs } from './blocks';
 import { WorkflowError, isWorkflowError } from './errors';
 import { blockOf, findStartNode, getNode, isTerminal, outgoing, resolveMove, type Move, type Step } from './graph';
 import { needsLicense, requireLicense } from './license';
+import { resolveUntil, toMs } from './time';
 import type {
   HistoryEntry,
   HistoryStore,
   HookTrigger,
   Logger,
+  Timer,
+  TimerStore,
   Subject,
   SubjectStore,
   TransactionRunner,
@@ -36,8 +39,10 @@ export interface ActionContext<V = Record<string, any>, S extends Subject = Subj
   workflow: Workflow;
   /** Whatever the caller passed as `input` to start / move. */
   input: Record<string, unknown>;
-  /** MoveOptions.actor of the call that led here. */
+  /** MoveOptions.actor of the call that led here (null when a timer fired). */
   actor: string | null;
+  /** 1 on the first run, 2+ when retrying (see BlockDef.retry). */
+  attempt: number;
   /** The open transaction (when the engine has a `transaction` runner). */
   tx: unknown;
 }
@@ -48,8 +53,16 @@ export interface ActionContext<V = Record<string, any>, S extends Subject = Subj
  *   { next: true } → continue along the only outgoing edge
  *   { branch }     → decision: follow the edge for that branch
  *   { to }         → jump to a specific next node (id or block id)
+ *   { wait, then? } → continue after a delay ('3d', ms, Date); `then` defaults to { next: true }
  */
-export type ActionResult<Branch extends string = string> = void | undefined | { next: true } | { branch: Branch } | { to: string };
+export type ActionResult<Branch extends string = string> =
+  | void
+  | undefined
+  | { next: true }
+  | { branch: Branch }
+  | { to: string }
+  /** Stay here and continue later: a duration ('3d', ms), a Date or an ISO date. Needs a timers store. */
+  | { wait: number | string | Date; then?: { next: true } | { branch: Branch } | { to: string } };
 
 export interface HookContext<C = Record<string, any>, S extends Subject = Subject> {
   subject: S;
@@ -90,6 +103,10 @@ export interface EngineOptions<B extends Blocks, H extends Hooks, S extends Subj
   transaction?: TransactionRunner;
   /** Records every move (from, to, branch, actor, time). Read it with engine.history(). */
   history?: HistoryStore;
+  /** Stores waits and retries. Fire due ones with engine.runDue() or engine.startTimers(). */
+  timers?: TimerStore;
+  /** Retry policy for every action without its own BlockDef.retry. */
+  retry?: RetryPolicy;
   /** Block definitions shared with the editor. Enables typed actions and validation. */
   blocks?: B;
   /** Hook definitions shared with the editor. */
@@ -114,6 +131,8 @@ export interface RunResult<S extends Subject = Subject> {
   /** Node ids entered during this call, in order (more than one when actions auto-advance). */
   path: string[];
   status: 'waiting' | 'completed';
+  /** Set when the subject is waiting on a timer (an action returned { wait }, or a retry is scheduled). */
+  wait?: { kind: 'resume' | 'retry'; until: string; attempt?: number };
 }
 
 export interface NextOption {
@@ -131,12 +150,16 @@ export interface SubjectView<S extends Subject = Subject> {
   node: NodeInfo | null;
   next: NextOption[];
   status: 'not_started' | 'waiting' | 'completed';
+  /** Pending waits and retries ([] without a timers store). */
+  timers: Timer[];
 }
 
 export interface EngineEvents {
   transitioned: { subjectId: Subject['id']; workflowId: WorkflowId; from: string | null; to: string; branch: string | null; actor: string | null };
   completed: { subjectId: Subject['id']; workflowId: WorkflowId; nodeId: string };
-  actionError: { subjectId: Subject['id']; nodeId: string; error: unknown };
+  actionError: { subjectId: Subject['id']; nodeId: string; attempt: number; error: unknown };
+  scheduled: { subjectId: Subject['id']; nodeId: string; kind: 'resume' | 'retry'; until: string; attempt: number };
+  timerError: { timer: Timer; error: unknown };
   hookError: { subjectId: Subject['id']; hookId: string; trigger: HookTrigger; error: unknown };
   hookExecuted: { subjectId: Subject['id']; hookId: string; hookType: string; trigger: HookTrigger };
 }
@@ -156,6 +179,10 @@ export interface Engine<B extends Blocks = Blocks, S extends Subject = Subject> 
   /** Fires hooks for any trigger (e.g. 'on_message') at the subject's current node. */
   emit(subjectId: S['id'], trigger: HookTrigger, input?: Record<string, unknown>): Promise<{ fired: number; failed: number }>;
   validate(workflow: Workflow): ValidationIssue[];
+  /** Fires due timers (waits and retries). Call it from a cron job or queue worker, or use startTimers(). */
+  runDue(opts?: { now?: Date; limit?: number }): Promise<{ processed: number; failed: number }>;
+  /** Calls runDue() every `intervalMs` (default 5000). Returns a stop function. */
+  startTimers(opts?: { intervalMs?: number }): () => void;
   on<E extends keyof EngineEvents>(event: E, listener: (payload: EngineEvents[E]) => void): () => void;
   readonly workflows: WorkflowStore;
   readonly blocks: B | undefined;
@@ -164,7 +191,7 @@ export interface Engine<B extends Blocks = Blocks, S extends Subject = Subject> 
 export function createEngine<const B extends Blocks, const H extends Hooks, S extends Subject>(
   options: EngineOptions<B, H, S>,
 ): Engine<B, S> {
-  const { workflows, subjects, transaction, history, blocks, hooks: hookDefs, maxSteps = 100 } = options;
+  const { workflows, subjects, transaction, history, timers, blocks, hooks: hookDefs, maxSteps = 100 } = options;
   if (!workflows) throw new TypeError('createEngine: `workflows` store is required');
   if (!subjects) throw new TypeError('createEngine: `subjects` store is required');
   if (options.licenseKey || needsLicense(workflows, subjects)) requireLicense('createEngine', options.licenseKey);
@@ -266,53 +293,98 @@ export function createEngine<const B extends Blocks, const H extends Hooks, S ex
     return { fired: list.length, failed };
   }
 
-  /** Enters `first`, runs hooks and the action, and keeps going while actions return a move. */
-  async function walk(subject: S, workflow: Workflow, from: WorkflowNode | null, first: Step, input: Record<string, unknown>, actor: string | null, tx: unknown): Promise<RunResult<S>> {
+  type Outcome = { move?: Move; wait?: RunResult['wait'] };
+
+  /** Runs the node's action and turns its result (or failure) into what happens next. */
+  async function act(subject: S, workflow: Workflow, node: WorkflowNode, attempt: number, input: Record<string, unknown>, actor: string | null, tx: unknown): Promise<Outcome> {
+    const type = node.data?.type;
+    const action: ((ctx: ActionContext) => Awaitable<ActionResult>) | undefined = actions[type];
+    if (!action) return {};
+    let result: ActionResult;
+    try {
+      result = await action({ subject, node: info(node), variables: { ...(node.data?.variables ?? {}) }, workflow, input, actor, attempt, tx });
+    } catch (error) {
+      fire('actionError', { subjectId: subject.id, nodeId: node.id, attempt, error });
+      if (isWorkflowError(error)) throw error;
+      const policy = blockOf(node, blocks)?.retry ?? options.retry;
+      if (policy && timers && attempt < policy.attempts) {
+        const delay = toMs(policy.delay ?? '30s') * Math.pow(policy.backoff ?? 2, attempt - 1);
+        const until = new Date(Date.now() + delay).toISOString();
+        await timers.add({ subjectId: subject.id, workflowId: workflow.id, nodeId: node.id, kind: 'retry', dueAt: until, move: null, attempt: attempt + 1 }, tx);
+        log.warn?.(`vise-workflow-engine: action "${type}" failed (attempt ${attempt}/${policy.attempts}), retrying at ${until}`, error);
+        fire('scheduled', { subjectId: subject.id, nodeId: node.id, kind: 'retry', until, attempt: attempt + 1 });
+        return { wait: { kind: 'retry', until, attempt: attempt + 1 } };
+      }
+      throw new WorkflowError('ACTION_FAILED', `Action "${type}" failed on node "${node.id}"`, { nodeId: node.id, attempt }, { cause: error });
+    }
+    if (!result || typeof result !== 'object') return {};
+    if ('wait' in result) {
+      if (!timers) throw new TypeError(`vise-workflow-engine: action "${type}" returned { wait } but the engine has no timers store`);
+      const until = resolveUntil(result.wait);
+      await timers.add({ subjectId: subject.id, workflowId: workflow.id, nodeId: node.id, kind: 'resume', dueAt: until, move: result.then ?? { next: true }, attempt: 1 }, tx);
+      fire('scheduled', { subjectId: subject.id, nodeId: node.id, kind: 'resume', until, attempt: 1 });
+      return { wait: { kind: 'resume', until } };
+    }
+    return { move: result as Move };
+  }
+
+  type Start = { enter: Step; from: WorkflowNode | null } | { actAt: WorkflowNode; attempt: number };
+
+  /**
+   * Enters nodes and runs their actions, following the moves actions return.
+   * Starts either by entering a node, or (retries) by re-running the current node's action.
+   */
+  async function walk(subject: S, workflow: Workflow, start: Start, input: Record<string, unknown>, actor: string | null, tx: unknown): Promise<RunResult<S>> {
     const path: string[] = [];
-    let current = from;
-    let step: Step | null = first;
+    let current: WorkflowNode | null = 'enter' in start ? start.from : start.actAt;
+    let step: Step | null = 'enter' in start ? start.enter : null;
+    let actOn: WorkflowNode | null = 'enter' in start ? null : start.actAt;
+    let attempt = 'enter' in start ? 1 : start.attempt;
+    let wait: RunResult['wait'];
 
-    while (step) {
-      if (path.length >= maxSteps) {
-        throw new WorkflowError('MAX_STEPS', `Stopped after ${maxSteps} automatic steps (cycle?)`, { path });
+    for (;;) {
+      if (step) {
+        if (path.length >= maxSteps) {
+          throw new WorkflowError('MAX_STEPS', `Stopped after ${maxSteps} automatic steps (cycle?)`, { path });
+        }
+        const target: WorkflowNode = step.node;
+        const ctx = { workflow, input, tx, from: current, to: target };
+
+        if (current) await runHooks('on_node_exit', current, { subject, ...ctx });
+
+        await subjects.setState(subject.id, { workflowId: workflow.id, nodeId: target.id, nodeType: target.data?.type }, tx);
+        if (timers) await timers.clear(subject.id, tx);
+        subject = { ...subject, workflowId: workflow.id, nodeId: target.id };
+        path.push(target.id);
+        // Only the first step is the caller's; later ones are the engine following actions.
+        const by = path.length === 1 ? actor : null;
+        const entry = { subjectId: subject.id, workflowId: workflow.id, from: current?.id ?? null, to: target.id, branch: step.branch, actor: by };
+        if (history) await history.append({ ...entry, at: new Date().toISOString() }, tx);
+        fire('transitioned', entry);
+
+        if (current) await runHooks('on_transition', target, { subject, ...ctx });
+        await runHooks('on_node_entry', target, { subject, ...ctx });
+
+        current = target;
+        actOn = target;
+        attempt = 1;
+        step = null;
       }
-      const target: WorkflowNode = step.node;
-      const ctx = { workflow, input, tx, from: current, to: target };
-
-      if (current) await runHooks('on_node_exit', current, { subject, ...ctx });
-
-      await subjects.setState(subject.id, { workflowId: workflow.id, nodeId: target.id, nodeType: target.data?.type }, tx);
-      subject = { ...subject, workflowId: workflow.id, nodeId: target.id };
-      path.push(target.id);
-      // Only the first step is the caller's; later ones are the engine following actions.
-      const by = path.length === 1 ? actor : null;
-      const entry = { subjectId: subject.id, workflowId: workflow.id, from: current?.id ?? null, to: target.id, branch: step.branch, actor: by };
-      if (history) await history.append({ ...entry, at: new Date().toISOString() }, tx);
-      fire('transitioned', entry);
-
-      if (current) await runHooks('on_transition', target, { subject, ...ctx });
-      await runHooks('on_node_entry', target, { subject, ...ctx });
-
-      const action: ((ctx: ActionContext) => Awaitable<ActionResult>) | undefined = actions[target.data?.type];
-      let result: ActionResult;
-      try {
-        result = action
-          ? await action({ subject, node: info(target), variables: { ...(target.data?.variables ?? {}) }, workflow, input, actor, tx })
-          : undefined;
-      } catch (error) {
-        fire('actionError', { subjectId: subject.id, nodeId: target.id, error });
-        if (isWorkflowError(error)) throw error;
-        throw new WorkflowError('ACTION_FAILED', `Action "${target.data?.type}" failed on node "${target.id}"`, { nodeId: target.id }, { cause: error });
+      if (!actOn) break;
+      const node = actOn;
+      actOn = null;
+      const outcome = await act(subject, workflow, node, attempt, input, actor, tx);
+      if (outcome.move) step = resolveMove(workflow, node.id, outcome.move);
+      else {
+        wait = outcome.wait;
+        break;
       }
-
-      current = target;
-      step = result && typeof result === 'object' ? resolveMove(workflow, target.id, result as Move) : null;
     }
 
     const node = current!;
-    const completed = isTerminal(workflow, node, blocks);
+    const completed = !wait && isTerminal(workflow, node, blocks);
     if (completed) fire('completed', { subjectId: subject.id, workflowId: workflow.id, nodeId: node.id });
-    return { subject, node: info(node), path, status: completed ? 'completed' : 'waiting' };
+    return { subject, node: info(node), path, status: completed ? 'completed' : 'waiting', ...(wait ? { wait } : {}) };
   }
 
   const engine: Engine<B, S> = {
@@ -329,24 +401,25 @@ export function createEngine<const B extends Blocks, const H extends Hooks, S ex
         }
         const start = findStartNode(workflow, blocks);
         if (!start) throw new WorkflowError('NO_START_NODE', `Workflow ${workflowId} has no start node`);
-        return walk(subject, workflow, null, { node: start, edge: null, branch: null }, opts.input ?? {}, opts.actor ?? null, tx);
+        return walk(subject, workflow, { enter: { node: start, edge: null, branch: null }, from: null }, opts.input ?? {}, opts.actor ?? null, tx);
       });
     },
 
     move(subjectId, move, opts = {}) {
       return run(async (tx) => {
         const { subject, workflow, node } = await load(subjectId, tx);
-        return walk(subject, workflow, node, resolveMove(workflow, node.id, move), opts.input ?? {}, opts.actor ?? null, tx);
+        return walk(subject, workflow, { enter: resolveMove(workflow, node.id, move), from: node }, opts.input ?? {}, opts.actor ?? null, tx);
       });
     },
 
     async get(subjectId) {
       const subject = await getSubject(subjectId, undefined);
-      if (subject.workflowId == null || subject.nodeId == null) return { subject, node: null, next: [], status: 'not_started' };
+      if (subject.workflowId == null || subject.nodeId == null) return { subject, node: null, next: [], status: 'not_started', timers: [] };
       const workflow = await getWorkflow(subject.workflowId, undefined);
       const node = getNode(workflow, subject.nodeId);
       if (!node) throw new WorkflowError('NODE_NOT_FOUND', `Subject ${subjectId} is on node "${subject.nodeId}", which no longer exists`, { subjectId });
-      return { subject, node: info(node), next: await engine.next(subjectId), status: isTerminal(workflow, node, blocks) ? 'completed' : 'waiting' };
+      const pending = timers ? await timers.list(subjectId) : [];
+      return { subject, node: info(node), next: await engine.next(subjectId), status: isTerminal(workflow, node, blocks) ? 'completed' : 'waiting', timers: pending };
     },
 
     async history(subjectId, opts) {
@@ -385,6 +458,55 @@ export function createEngine<const B extends Blocks, const H extends Hooks, S ex
 
     validate(workflow) {
       return validateWorkflow(workflow, { blocks, hooks: hookDefs });
+    },
+
+    async runDue({ now = new Date(), limit = 100 } = {}) {
+      if (!timers) return { processed: 0, failed: 0 };
+      let processed = 0;
+      let failed = 0;
+      for (let i = 0; i < limit; i++) {
+        // Claim (remove) first, in its own transaction, so two workers never run the same timer.
+        const timer = await run((tx) => timers.claimDue(now, tx));
+        if (!timer) break;
+        try {
+          await run(async (tx) => {
+            const subject = await subjects.get(timer.subjectId, tx);
+            // Stale: the subject moved on (or was restarted) since the timer was set.
+            if (!subject || subject.nodeId !== timer.nodeId || String(subject.workflowId) !== String(timer.workflowId)) return;
+            const workflow = await getWorkflow(timer.workflowId, tx);
+            const node = getNode(workflow, timer.nodeId);
+            if (!node) return;
+            if (timer.kind === 'resume') {
+              return walk(subject, workflow, { enter: resolveMove(workflow, node.id, (timer.move ?? { next: true }) as Move), from: node }, { timer: true }, null, tx);
+            }
+            return walk(subject, workflow, { actAt: node, attempt: timer.attempt }, { retry: timer.attempt }, null, tx);
+          });
+          processed++;
+        } catch (error) {
+          failed++;
+          log.error?.(`vise-workflow-engine: timer for subject ${timer.subjectId} failed`, error);
+          fire('timerError', { timer, error });
+        }
+      }
+      return { processed, failed };
+    },
+
+    startTimers({ intervalMs = 5000 } = {}) {
+      let busy = false;
+      const tick = async () => {
+        if (busy) return;
+        busy = true;
+        try {
+          await engine.runDue();
+        } catch (error) {
+          log.error?.('vise-workflow-engine: runDue failed', error);
+        } finally {
+          busy = false;
+        }
+      };
+      const handle = setInterval(() => void tick(), intervalMs);
+      void tick();
+      return () => clearInterval(handle);
     },
 
     on(event, listener) {

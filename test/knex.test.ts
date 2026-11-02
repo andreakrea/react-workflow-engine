@@ -1,7 +1,7 @@
 import knexFactory, { type Knex } from 'knex';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createEngine, defineBlocks, type WorkflowInput } from '../src';
-import { createWorkflowHistoryTable, createWorkflowsTable, knexStores, migrationsPath } from '../src/knex';
+import { createWorkflowHistoryTable, createWorkflowsTable, createWorkflowTimersTable, knexStores, migrationsPath } from '../src/knex';
 import { activateTestLicense } from './helpers';
 
 let knex: Knex;
@@ -33,6 +33,7 @@ beforeAll(async () => {
   knex = knexFactory({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
   await createWorkflowsTable(knex, { extend: (t) => t.integer('tenant_id') });
   await createWorkflowHistoryTable(knex);
+  await createWorkflowTimersTable(knex);
   await knex.schema.createTable('tickets', (t) => {
     t.increments('id');
     t.string('subject_line');
@@ -110,6 +111,21 @@ describe('knex adapter', () => {
     const [{ id: id2 }] = await knex('tickets').insert({ subject_line: 'x', priority: 1 }).returning('id');
     await expect(failing.start(id2, wf.id)).rejects.toMatchObject({ code: 'ACTION_FAILED' });
     expect(await engine.history(id2)).toEqual([]);
+  });
+
+  it('persists waits in workflow_timers and resumes them', async () => {
+    const stores = knexStores(knex, { subjects: { table: 'tickets' }, timers: true });
+    const wf = await stores.workflows.create(flow);
+    const [{ id }] = await knex('tickets').insert({ subject_line: 't', priority: 1 }).returning('id');
+    const engine = createEngine({
+      ...stores, blocks, logger: {},
+      actions: { start: () => ({ next: true }), triage: () => ({ branch: 'bot' }), bot: ({ input }) => (input.timer ? { next: true } : { wait: '15m' }) },
+    });
+    expect(await engine.start(id, wf.id)).toMatchObject({ node: { id: 'c' }, wait: { kind: 'resume' } });
+    expect(await knex('workflow_timers').count({ n: '*' }).first()).toMatchObject({ n: 1 });
+    expect(await engine.runDue({ now: new Date(Date.now() + 20 * 60e3) })).toEqual({ processed: 1, failed: 0 });
+    expect(await knex('tickets').where({ id }).first()).toMatchObject({ current_node_id: 'e' });
+    expect(await knex('workflow_timers').count({ n: '*' }).first()).toMatchObject({ n: 0 });
   });
 
   it('exposes the bundled 1.x migration directory', () => {
