@@ -10,6 +10,8 @@ A graph-based workflow engine with a drag-and-drop React editor. Admins draw the
 
 **[▶ Live demo](https://andreakrea.github.io/react-workflow-engine/)**
 
+> **Using an AI coding agent?** Point it at [`AGENT.md`](AGENT.md) (also shipped at `node_modules/vise-workflow-engine/AGENT.md`): a step-by-step integration playbook with stack decisions, verified code for every layer, pitfalls and a verification checklist.
+
 ```bash
 npm install vise-workflow-engine
 npm install knex pg                      # server, if you use the knex adapter
