@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type ReactNode } from 'react';
-import ReactFlow, {
+import {
   Background,
   BackgroundVariant,
   Controls,
   MarkerType,
   MiniMap,
+  ReactFlow,
   ReactFlowProvider,
   addEdge,
   useEdgesState,
@@ -12,7 +13,7 @@ import ReactFlow, {
   useReactFlow,
   type Connection,
   type Edge,
-} from 'reactflow';
+} from '@xyflow/react';
 import type { Blocks, Hooks } from '../core/blocks';
 import type { Workflow, WorkflowHook, WorkflowId, WorkflowInput } from '../core/types';
 import { validateWorkflow, type ValidationIssue } from '../core/validate';
@@ -56,6 +57,8 @@ export interface WorkflowEditorProps<Id extends WorkflowId = WorkflowId> {
   title?: ReactNode;
   /** Extra buttons in the header, before Save. */
   headerActions?: ReactNode;
+  /** Hides the small "React Flow" link. Please only do this with a React Flow Pro subscription. */
+  hideAttribution?: boolean;
   /** 'light' (default), 'dark', or 'system' to follow prefers-color-scheme. */
   theme?: 'light' | 'dark' | 'system';
   readOnly?: boolean;
@@ -87,8 +90,8 @@ const Icon = {
 function Editor(props: WorkflowEditorProps) {
   const { blocks, hooks: hookDefs = {}, client, readOnly = false } = props;
   const rf = useReactFlow();
-  const [nodes, setNodes, onNodesChange] = useNodesState<BlockNodeData>([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const [nodes, setNodes, onNodesChange] = useNodesState<FlowNode>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [hookList, setHookList] = useState<WorkflowHook[]>([]);
   const [name, setName] = useState('Untitled workflow');
   const [description, setDescription] = useState<string | null>(null);
@@ -559,7 +562,7 @@ function Editor(props: WorkflowEditorProps) {
               fitView
               fitViewOptions={{ padding: 0.2, maxZoom: 1.1 }}
               minZoom={0.2}
-              proOptions={{ hideAttribution: true }}
+              proOptions={{ hideAttribution: !!props.hideAttribution }}
             >
               <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--vwe-dots)" />
               <Controls showInteractive={false} />

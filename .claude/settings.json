@@ -2,7 +2,8 @@
   "permissions": {
     "deny": [
       "Read(**/package-lock.json)",
-      "Read(**/dist/**)"
+      "Read(./dist/**)",
+      "Read(./demo/dist/**)"
     ]
   }
 }

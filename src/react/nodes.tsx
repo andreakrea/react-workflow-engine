@@ -1,8 +1,8 @@
 import { memo, type CSSProperties, type ReactNode } from 'react';
-import { Handle, Position, type NodeProps } from 'reactflow';
+import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { colorOf, getBranches, type BlockColor, type BlockDef, type BlockKind } from '../core/blocks';
 import { useEditorContext } from './context';
-import type { BlockNodeData } from './convert';
+import type { FlowNode } from './convert';
 
 export const KIND_LABEL: Record<BlockKind, string> = { start: 'Start', step: 'Step', decision: 'Decision', end: 'End' };
 
@@ -28,7 +28,7 @@ function summary(def: BlockDef | undefined, values: Record<string, unknown>): Ar
   return rows.slice(0, 3);
 }
 
-export const BlockNode = memo(function BlockNode({ id, data, selected }: NodeProps<BlockNodeData>) {
+export const BlockNode = memo(function BlockNode({ id, data, selected }: NodeProps<FlowNode>) {
   const { blocks, issuesByNode } = useEditorContext();
   const def = blocks[data.type];
   const kind = def?.kind ?? 'step';

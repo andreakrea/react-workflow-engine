@@ -643,6 +643,8 @@ textarea.vwe-input { resize: vertical; line-height: 1.45; }
 @media (min-width: 1024px) { .vwe-root .react-flow__minimap { display: block; } }
 @media (pointer: coarse) { .vwe-root .react-flow__controls-button { width: 40px; height: 40px; } }
 
+.vwe-root .react-flow__attribution { background: transparent; }
+.vwe-root .react-flow__attribution a { color: var(--vwe-muted); font-size: 10px; }
 .vwe-empty {
   position: absolute;
   top: 50%;

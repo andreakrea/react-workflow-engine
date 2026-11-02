@@ -14,6 +14,6 @@ export default defineConfig({
       { find: 'vise-workflow-engine/react', replacement: root('src/react/index.ts') },
       { find: /^vise-workflow-engine$/, replacement: root('src/index.ts') },
     ],
-    dedupe: ['react', 'react-dom', 'reactflow'],
+    dedupe: ['react', 'react-dom', '@xyflow/react'],
   },
 });

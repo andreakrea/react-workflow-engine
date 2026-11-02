@@ -1,15 +1,16 @@
-import type { Edge, Node } from 'reactflow';
+import type { Edge, Node } from '@xyflow/react';
 import { defaultVariableValues, type Blocks, type Hooks } from '../core/blocks';
 import { kindOf, normalizeBranch } from '../core/graph';
 import type { WorkflowEdge, WorkflowHook, WorkflowInput, WorkflowNode } from '../core/types';
 
-export interface BlockNodeData {
+// A type alias (not an interface) so it satisfies @xyflow/react's Record<string, unknown> constraint.
+export type BlockNodeData = {
   type: string;
   label?: string;
   variables: Record<string, unknown>;
-}
+};
 
-export type FlowNode = Node<BlockNodeData>;
+export type FlowNode = Node<BlockNodeData, 'block'>;
 
 export function newId(prefix: string): string {
   const rand = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID().slice(0, 8) : Math.random().toString(36).slice(2, 10);

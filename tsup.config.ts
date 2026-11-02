@@ -12,7 +12,7 @@ export default defineConfig({
   clean: true,
   sourcemap: true,
   target: 'es2020',
-  external: ['react', 'react-dom', 'react/jsx-runtime', 'reactflow', 'knex'],
+  external: ['react', 'react-dom', 'react/jsx-runtime', '@xyflow/react', 'knex'],
   // knex/index.ts reads import.meta.url only when __dirname is missing (ESM).
   esbuildOptions(options) {
     options.logOverride = { 'empty-import-meta': 'silent' };

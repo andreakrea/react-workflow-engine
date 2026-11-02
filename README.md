@@ -12,7 +12,7 @@ A graph-based workflow engine with a drag-and-drop React editor. Admins draw the
 ```bash
 npm install vise-workflow-engine
 npm install knex pg                      # server, if you use the knex adapter
-npm install react react-dom reactflow@11 # editor
+npm install react react-dom @xyflow/react  # editor (React Flow 12)
 ```
 
 ## Quick start — three files
@@ -304,6 +304,7 @@ app.all('/api/workflows/*', (c) => handler(c.req.raw));
 | `icons` | icons by block or hook id, e.g. `{ send_email: <MailIcon /> }` — otherwise the definition's `icon` string, then the label's initial |
 | `theme` | `'light'` (default), `'dark'`, or `'system'` |
 | `readOnly`, `className`, `style` | |
+| `hideAttribution` | hides the small React Flow link (please only with a React Flow Pro subscription) |
 
 The editor fills its parent — give the parent a height. It follows a quiet console look (white cards, zinc neutrals, black primary button); block colours appear only in each block's icon chip. Retheme it with CSS variables:
 
@@ -348,6 +349,7 @@ Stored data is compatible: same `workflows` table and migration name, and workfl
 | `require('vise-workflow-engine').migrationsPath` | `require('vise-workflow-engine/knex').migrationsPath` |
 | `import { WorkflowEditor } from 'vise-workflow-engine/frontend'` + `apiUrl` | `from 'vise-workflow-engine/react'` + `client={createHttpClient({ baseUrl })}` |
 | `blockTypes` / `hookTypes` arrays with Tailwind `color` classes | `blocks` / `hooks` objects with CSS colours |
+| peer dependency `reactflow@11` | `@xyflow/react@12` |
 
 `<WorkflowEditor licenseKey>` is gone: the editor needs no key. Behaviour changes: unknown decisions throw instead of following the first edge; moving "by type" only considers reachable nodes; `start` fires `on_node_entry` hooks like any other entry.
 

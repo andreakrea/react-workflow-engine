@@ -21,7 +21,7 @@ The core idea: businesses sign up, visually design their support workflow using 
   - `createEngine` — graph-based state machine (ticket states, typed actions per block, lifecycle hooks), from `vise-workflow-engine`
   - `knexStores` — Postgres storage for workflows + your `conversations` table, from `vise-workflow-engine/knex`
   - `createHandler` / `toNodeHandler` — workflow CRUD HTTP API, from `vise-workflow-engine/server`
-  - `WorkflowEditor` / `createHttpClient` — React drag-and-drop editor, from `vise-workflow-engine/react`
+  - `WorkflowEditor` / `createHttpClient` — React drag-and-drop editor (needs `@xyflow/react` 12), from `vise-workflow-engine/react`
 
 ---
 

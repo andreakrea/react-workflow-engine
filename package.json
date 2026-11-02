@@ -72,7 +72,7 @@
     "state-machine",
     "graph",
     "editor",
-    "reactflow",
+    "xyflow",
     "express",
     "knex",
     "postgresql",
@@ -83,7 +83,7 @@
     "knex": ">=2.0.0",
     "react": ">=18.0.0",
     "react-dom": ">=18.0.0",
-    "reactflow": ">=11.10.0 <12"
+    "@xyflow/react": ">=12.0.0 <13"
   },
   "peerDependenciesMeta": {
     "knex": {
@@ -95,7 +95,7 @@
     "react-dom": {
       "optional": true
     },
-    "reactflow": {
+    "@xyflow/react": {
       "optional": true
     }
   },
@@ -106,12 +106,12 @@
     "@types/node": "^20.19.43",
     "@types/react": "^18.3.31",
     "@types/react-dom": "^18.3.7",
+    "@xyflow/react": "^12.12.1",
     "better-sqlite3": "^11.10.0",
     "gh-pages": "^6.3.0",
     "knex": "^3.3.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "reactflow": "^11.11.4",
     "tsup": "^8.5.1",
     "typescript": "^5.9.3",
     "vitest": "^2.1.9"
