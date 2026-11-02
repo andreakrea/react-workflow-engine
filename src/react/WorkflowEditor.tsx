@@ -556,7 +556,17 @@ function Editor(props: WorkflowEditorProps) {
                 if (changes.some((c) => c.type === 'remove')) touch();
               }}
               onConnect={onConnect}
-              onNodeClick={(_, n) => setSelection({ kind: 'node', id: n.id })}
+              onNodeClick={(_, n) => {
+                setSelection({ kind: 'node', id: n.id });
+                // On phones the settings open as a bottom sheet: keep the node visible above it.
+                const el = canvasRef.current;
+                if (el && el.clientWidth < 768) {
+                  const zoom = Math.max(rf.getZoom(), 0.8);
+                  const w = n.measured?.width ?? 232;
+                  const h = n.measured?.height ?? 60;
+                  rf.setCenter(n.position.x + w / 2, n.position.y + h / 2 + (el.clientHeight * 0.32) / zoom, { zoom, duration: 250 });
+                }
+              }}
               onPaneClick={() => setSelection(null)}
               nodesDraggable={!readOnly}
               nodesConnectable={!readOnly}
