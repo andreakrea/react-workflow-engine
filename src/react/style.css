@@ -173,7 +173,10 @@
   cursor: pointer;
   transition: background-color var(--vwe-ease), color var(--vwe-ease);
 }
-.vwe-icon-btn:hover { background: var(--vwe-subtle); color: var(--vwe-text); }
+.vwe-icon-btn:hover:not(:disabled) { background: var(--vwe-subtle); color: var(--vwe-text); }
+.vwe-icon-btn:disabled { opacity: 0.35; cursor: default; }
+.vwe-btn-group { display: none; align-items: center; gap: 2px; margin-right: 4px; }
+@media (min-width: 768px) { .vwe-btn-group { display: inline-flex; } }
 
 /* Toolbar pill: "Label Value ▾" */
 .vwe-pill {

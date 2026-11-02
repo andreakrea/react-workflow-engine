@@ -256,7 +256,7 @@ All variables are listed at the top of `vise-workflow-engine/react/style.css` (`
 
 Hooks live in the sidebar's **Hooks** tab (enable, scope to nodes, settings); blocks in the **Blocks** tab, searchable and grouped by kind. On phones both open as bottom sheets.
 
-Click a block to add it below the selected node (and connect it), or drag it anywhere. `Ctrl/Cmd+S` saves; `Delete` removes the selection.
+Click a block to add it below the selected node (and connect it), or drag it anywhere. Shortcuts: `Ctrl/Cmd+Z` undo, `Ctrl/Cmd+Shift+Z` or `Ctrl+Y` redo, `Ctrl/Cmd+S` save, `Delete` removes the selection.
 
 ---
 

@@ -20,6 +20,7 @@ import type { WorkflowClient } from './client';
 import { EditorContext, type EditorContextValue } from './context';
 import { createBlockNode, createHook, fromFlow, toFlow, type BlockNodeData, type FlowNode } from './convert';
 import { nodeTypes } from './nodes';
+import { useHistory } from './useHistory';
 import { DND_TYPE, HookInspector, NodeInspector, Sidebar, WorkflowList } from './panels';
 
 /** The editable part of a workflow (what onChange emits and value accepts). */
@@ -78,6 +79,8 @@ const emptyDraft = (blocks: Blocks): WorkflowDraft => {
 const Icon = {
   list: <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden><path d="M5.5 4h8M5.5 8h8M5.5 12h8M2.5 4h.01M2.5 8h.01M2.5 12h.01" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>,
   plus: <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden><path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>,
+  undo: <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden><path d="M5.5 3.5L2.5 6.5l3 3M2.5 6.5H10a3.5 3.5 0 010 7H7" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>,
+  redo: <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden><path d="M10.5 3.5l3 3-3 3M13.5 6.5H6a3.5 3.5 0 000 7h3" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>,
   chevron: <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden><path d="M4.5 6.5L8 10l3.5-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>,
 };
 
@@ -101,6 +104,7 @@ function Editor(props: WorkflowEditorProps) {
   const lastEmitted = useRef<WorkflowDraft | null>(null);
   const propsRef = useRef(props);
   propsRef.current = props;
+  const historyRef = useRef<ReturnType<typeof useHistory> | null>(null);
 
   const reportError = useCallback((error: unknown) => {
     setStatus({ kind: 'error', message: error instanceof Error ? error.message : String(error) });
@@ -110,7 +114,9 @@ function Editor(props: WorkflowEditorProps) {
   const loadDraft = useCallback(
     (draft: WorkflowDraft) => {
       const flow = toFlow(draft, blocks);
-      setSavedSig(signature(draft.name, draft.description ?? null, flow.nodes, flow.edges, flow.hooks));
+      const loaded = signature(draft.name, draft.description ?? null, flow.nodes, flow.edges, flow.hooks);
+      setSavedSig(loaded);
+      historyRef.current?.reset(loaded);
       setNodes(flow.nodes);
       setEdges(flow.edges);
       setHookList(flow.hooks);
@@ -176,6 +182,21 @@ function Editor(props: WorkflowEditorProps) {
     [currentId, name, description, nodes, edges, hookList],
   );
   const sig = useMemo(() => signature(name, description, nodes, edges, hookList), [name, description, nodes, edges, hookList]);
+  const restore = useCallback(
+    (snapshot: string) => {
+      const d = JSON.parse(snapshot) as WorkflowDraft;
+      const flow = toFlow(d, blocks);
+      setNodes(flow.nodes);
+      setEdges(flow.edges);
+      setHookList(flow.hooks);
+      setName(d.name);
+      setDescription(d.description ?? null);
+      setSelection((sel) => (sel && (sel.kind === 'node' ? flow.nodes : flow.hooks).some((x) => x.id === sel.id) ? sel : null));
+    },
+    [blocks, setEdges, setNodes],
+  );
+  const history = useHistory(sig, restore);
+  historyRef.current = history;
   // Dirty = differs from what was last loaded or saved, so selecting or undoing an edit doesn't count.
   const dirty = sig !== savedSig;
   const issues = useMemo(() => validateWorkflow(draft, { blocks, hooks: hookDefs }), [draft, blocks, hookDefs]);
@@ -233,6 +254,7 @@ function Editor(props: WorkflowEditorProps) {
       }
 
       const node = createBlockNode(type, blocks, pos);
+      historyRef.current?.checkpoint();
       setNodes((ns) => [...ns.map((n) => (n.selected ? { ...n, selected: false } : n)), { ...node, selected: true }]);
       if (!position && canChain) setEdges((es) => addEdge({ id: `e_${anchor!.id}_out_${node.id}`, source: anchor!.id, target: node.id, sourceHandle: null, targetHandle: null }, es));
       if (!position) rf.setCenter(pos.x + 110, pos.y + 40, { zoom: rf.getZoom(), duration: 200 });
@@ -246,6 +268,7 @@ function Editor(props: WorkflowEditorProps) {
   const addHook = useCallback(
     (type: string) => {
       const hook = createHook(type, hookDefs);
+      historyRef.current?.checkpoint();
       setHookList((hs) => [...hs, hook]);
       select({ kind: 'hook', id: hook.id });
       touch();
@@ -275,6 +298,7 @@ function Editor(props: WorkflowEditorProps) {
   const onConnect = useCallback(
     (c: Connection) => {
       if (readOnly || !c.source || !c.target || c.source === c.target) return;
+      historyRef.current?.checkpoint();
       setEdges((es) => {
         // A decision branch leads to exactly one node: reconnecting replaces it.
         const kept = c.sourceHandle ? es.filter((e) => !(e.source === c.source && e.sourceHandle === c.sourceHandle)) : es;
@@ -299,6 +323,7 @@ function Editor(props: WorkflowEditorProps) {
 
   const deleteNode = useCallback(
     (id: string) => {
+      historyRef.current?.checkpoint();
       setNodes((ns) => ns.filter((n) => n.id !== id));
       setEdges((es) => es.filter((e) => e.source !== id && e.target !== id));
       forgetNodes([id]);
@@ -344,9 +369,19 @@ function Editor(props: WorkflowEditorProps) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's' && client && dirty) {
+      const mod = e.ctrlKey || e.metaKey;
+      const key = e.key.toLowerCase();
+      if (mod && key === 's' && client && dirty) {
         e.preventDefault();
         void save();
+      }
+      // Leave text fields to the browser's own undo.
+      const t = e.target as HTMLElement | null;
+      const typing = !!t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
+      if (mod && !typing && !readOnly && (key === 'z' || key === 'y')) {
+        e.preventDefault();
+        if (key === 'y' || e.shiftKey) history.redo();
+        else history.undo();
       }
       if (e.key === 'Escape') {
         setListOpen(false);
@@ -356,7 +391,7 @@ function Editor(props: WorkflowEditorProps) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [client, dirty, save]);
+  }, [client, dirty, history, readOnly, save]);
 
   // ── Rendering helpers ─────────────────────────────────────────────────────
 
@@ -408,6 +443,12 @@ function Editor(props: WorkflowEditorProps) {
             <span className={`vwe-status${status.kind === 'error' ? ' is-error' : dirty ? ' is-dirty' : ''}`} role="status">{statusText}</span>
           </div>
           <div className="vwe-bar__right">
+            {!readOnly && (
+              <div className="vwe-btn-group">
+                <button type="button" className="vwe-icon-btn" onClick={history.undo} disabled={!history.canUndo} aria-label="Undo" title="Undo (Ctrl+Z)">{Icon.undo}</button>
+                <button type="button" className="vwe-icon-btn" onClick={history.redo} disabled={!history.canRedo} aria-label="Redo" title="Redo (Ctrl+Shift+Z)">{Icon.redo}</button>
+              </div>
+            )}
             {!readOnly && (
               <button type="button" className="vwe-btn vwe-only-mobile" aria-expanded={sheetOpen} onClick={() => setSheetOpen((o) => !o)}>
                 {Icon.plus} Add
@@ -493,6 +534,7 @@ function Editor(props: WorkflowEditorProps) {
               edges={edges}
               nodeTypes={nodeTypes}
               onNodesChange={(changes) => {
+                if (changes.some((c) => c.type === 'remove')) historyRef.current?.checkpoint();
                 onNodesChange(changes);
                 const removed = changes.filter((c) => c.type === 'remove').map((c) => (c as { id: string }).id);
                 if (removed.length) {
@@ -502,6 +544,7 @@ function Editor(props: WorkflowEditorProps) {
                 if (changes.some((c) => c.type === 'position' || c.type === 'remove')) touch();
               }}
               onEdgesChange={(changes) => {
+                if (changes.some((c) => c.type === 'remove')) historyRef.current?.checkpoint();
                 onEdgesChange(changes);
                 if (changes.some((c) => c.type === 'remove')) touch();
               }}
@@ -542,6 +585,7 @@ function Editor(props: WorkflowEditorProps) {
                 issues={issuesByNode.get(selectedHook.id) ?? []}
                 onChange={updateHook}
                 onDelete={(id) => {
+                  historyRef.current?.checkpoint();
                   setHookList((hs) => hs.filter((h) => h.id !== id));
                   setSelection(null);
                   touch();
