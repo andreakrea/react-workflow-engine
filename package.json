@@ -4,7 +4,9 @@
   "description": "Graph-based workflow engine with a drag-and-drop React editor. Typed blocks shared by server and editor, pluggable storage, framework-agnostic HTTP handler.",
   "license": "MIT",
   "sideEffects": [
-    "*.css"
+    "*.css",
+    "./dist/element.mjs",
+    "./dist/element.global.js"
   ],
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
@@ -51,6 +53,14 @@
       }
     },
     "./react/style.css": "./dist/style.css",
+    "./element": {
+      "import": {
+        "types": "./dist/element.d.mts",
+        "default": "./dist/element.mjs"
+      },
+      "default": "./dist/element.global.js"
+    },
+    "./element.global.js": "./dist/element.global.js",
     "./package.json": "./package.json"
   },
   "files": [
@@ -61,7 +71,7 @@
     "CHANGELOG.md"
   ],
   "scripts": {
-    "build": "tsup && node scripts/build-css.mjs",
+    "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsup && node scripts/build-css.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run typecheck && npm test && npm run build",
@@ -79,7 +89,11 @@
     "knex",
     "postgresql",
     "drag-and-drop",
-    "react"
+    "react",
+    "web-component",
+    "custom-element",
+    "angular",
+    "vue"
   ],
   "peerDependencies": {
     "@xyflow/react": ">=12.0.0 <13",

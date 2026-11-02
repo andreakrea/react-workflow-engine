@@ -46,6 +46,10 @@ const client = createHttpClient({ baseUrl: '/api/workflows', headers: () => ({ A
 ```
 Italian UI: `import { itLabels } from 'vise-workflow-engine/react'` and pass `labels={itLabels}`. `baseUrl` is the exact mount path (nothing appended). The editor fills its parent; the parent needs a height. Controlled alternative: `value` + `onChange(draft, issues)` without `client`.
 
+## Angular / Vue / plain HTML
+
+Use the custom element, not the React component: `import('vise-workflow-engine/element')` (lazy), add `CUSTOM_ELEMENTS_SCHEMA` in Angular, then `<vise-workflow-editor base-url="/api/workflows" lang="it" [blocks]="blocks" [headers]="headers" (saved)="onSaved($event)">`. Import `defineBlocks`/`v` from `vise-workflow-engine` (core), not from the element. Events are CustomEvents (`saved`, `change`, `error`, `deleted`, `workflow-id-change`). Theme with `--vwe-*` variables on the tag.
+
 ## Engine API
 
 - `engine.start(subjectId, workflowId, { input? })` → `{ subject, node, path, status: 'waiting' | 'completed' }`

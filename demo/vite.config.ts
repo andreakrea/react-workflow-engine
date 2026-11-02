@@ -7,9 +7,13 @@ const root = (p: string) => fileURLToPath(new URL(`../${p}`, import.meta.url));
 // The demo runs on the local source, so it always shows the current code.
 export default defineConfig({
   plugins: [react()],
+  build: {
+    rollupOptions: { input: { main: fileURLToPath(new URL('index.html', import.meta.url)), element: fileURLToPath(new URL('element.html', import.meta.url)) } },
+  },
   base: '/react-workflow-engine/',
   resolve: {
     alias: [
+      { find: 'vise-workflow-engine/element', replacement: root('dist/element.mjs') },
       { find: 'vise-workflow-engine/react/style.css', replacement: root('dist/style.css') },
       { find: 'vise-workflow-engine/react', replacement: root('src/react/index.ts') },
       { find: /^vise-workflow-engine$/, replacement: root('src/index.ts') },

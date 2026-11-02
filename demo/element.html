@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>vise-workflow-engine — custom element</title>
+    <style>
+      /* A host page with its own, deliberately aggressive styles: none of them reach the editor. */
+      * { font-family: Georgia, serif; }
+      button { background: hotpink; border-radius: 0; }
+      body { margin: 0; background: #fff8ee; }
+      header { display: flex; gap: 12px; align-items: center; padding: 12px 20px; background: #222; color: #fff; }
+      .slot { height: calc(100dvh - 120px); margin: 16px 20px; border: 1px solid #ccc; }
+      /* Theming passes through the shadow boundary. */
+      vise-workflow-editor { --vwe-primary: #0f766e; --vwe-focus: #0f766e; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <strong>No React, no framework</strong>
+      <button id="host-btn" type="button">Host button</button>
+      <span id="last"></span>
+    </header>
+    <div class="slot">
+      <vise-workflow-editor heading="Settings" lang="en"></vise-workflow-editor>
+    </div>
+    <script type="module">
+      import { createLocalClient, defineBlocks, v } from 'vise-workflow-engine/element';
+
+      const el = document.querySelector('vise-workflow-editor');
+      el.blocks = defineBlocks({
+        start: { kind: 'start', label: 'New request', color: { bg: '#dcfce7', text: '#15803d' } },
+        review: { kind: 'step', label: 'Review', color: { bg: '#dbeafe', text: '#1d4ed8' } },
+        approve: { kind: 'decision', label: 'Approved?', color: { bg: '#fef9c3', text: '#a16207' } },
+        notify: { kind: 'step', label: 'Notify customer', color: { bg: '#e0e7ff', text: '#4338ca' }, variables: { email: v.string({ label: 'Email', required: true }) } },
+        done: { kind: 'end', label: 'Closed' },
+      });
+      el.icons = {
+        notify: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3.5" width="12" height="9" rx="1.5"/><path d="M2.5 4.5L8 9l5.5-4.5"/></svg>',
+      };
+      el.client = createLocalClient({ storageKey: 'vise-wfe-element-demo' });
+      el.addEventListener('saved', (e) => {
+        document.getElementById('last').textContent = `Saved “${e.detail.name}”`;
+      });
+    </script>
+  </body>
+</html>

@@ -108,6 +108,7 @@ function Editor(props: WorkflowEditorProps) {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [list, setList] = useState<Workflow[] | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const lastEmitted = useRef<WorkflowDraft | null>(null);
   const propsRef = useRef(props);
   propsRef.current = props;
@@ -378,12 +379,18 @@ function Editor(props: WorkflowEditorProps) {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
       const key = e.key.toLowerCase();
+      // composedPath sees through shadow DOM (the custom element) to the real target.
+      const path = e.composedPath?.() ?? [];
+      const t = (path[0] ?? e.target) as HTMLElement | null;
+      // Only react to keys pressed inside this editor (or with nothing focused), so
+      // several editors and the host page's own shortcuts don't interfere.
+      const inside = (rootRef.current && path.includes(rootRef.current)) || t === document.body || t === document.documentElement;
+      if (!inside) return;
       if (mod && key === 's' && client && dirty) {
         e.preventDefault();
         void save();
       }
       // Leave text fields to the browser's own undo.
-      const t = e.target as HTMLElement | null;
       const typing = !!t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
       if (mod && !typing && !readOnly && (key === 'z' || key === 'y')) {
         e.preventDefault();
@@ -428,7 +435,7 @@ function Editor(props: WorkflowEditorProps) {
 
   return (
     <EditorContext.Provider value={ctx}>
-      <div className={`vwe-root${props.className ? ` ${props.className}` : ''}`} data-theme={props.theme ?? 'light'} style={props.style}>
+      <div ref={rootRef} className={`vwe-root${props.className ? ` ${props.className}` : ''}`} data-theme={props.theme ?? 'light'} style={props.style}>
         <header className="vwe-bar">
           <div className="vwe-bar__left">
             {props.title && (

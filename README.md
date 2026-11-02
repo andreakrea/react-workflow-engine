@@ -5,6 +5,7 @@ A graph-based workflow engine with a drag-and-drop React editor. Admins draw the
 - **One config, both sides.** Define blocks once; the editor builds its palette and forms from them, the engine type-checks your handlers against them.
 - **Strict, typed engine.** Typos in block ids, branches or variables are compile errors. Invalid moves throw instead of guessing.
 - **Any database, any framework.** Knex adapter included (Postgres, MySQL, SQLite), or implement two small interfaces. The HTTP handler is a standard `Request → Response` function for Express, Next.js, Hono, Bun…
+- **Any frontend.** A React component, or `<vise-workflow-editor>` for Angular, Vue and plain HTML.
 - **Drop-in editor.** Fills its container, styles scoped under `.vwe-root` (no Tailwind, no global reset), light/dark themes, live validation, auth headers, callbacks instead of popups.
 
 **[▶ Live demo](https://andreakrea.github.io/react-workflow-engine/)**
@@ -103,7 +104,7 @@ export function WorkflowSettings({ id }: { id?: number }) {
 }
 ```
 
-That's the whole integration.
+That's the whole integration. Not on React? Use the custom element instead — [any framework](#any-framework-vise-workflow-editor-vise-workflow-engineelement).
 
 ---
 
@@ -290,6 +291,81 @@ export const { GET, POST, PUT, PATCH, DELETE } = handler;
 // Hono / Bun / Deno — full URLs, so set basePath: '/api/workflows' here too
 app.all('/api/workflows/*', (c) => handler(c.req.raw));
 ```
+
+## Any framework: `<vise-workflow-editor>` (`vise-workflow-engine/element`)
+
+The same editor as a standard custom element, for Angular, Vue, Svelte or plain HTML. React and React Flow are bundled inside (about 125 KB gzipped) and its styles live in a shadow root: the host page's CSS can't break it, and it can't touch the host page. No peer dependencies.
+
+**Angular**
+
+```ts
+import { Component, CUSTOM_ELEMENTS_SCHEMA } from '@angular/core';
+import { blocks, hooks } from '../workflow.config'; // imports from 'vise-workflow-engine' (small)
+
+@Component({
+  selector: 'app-workflow-settings',
+  schemas: [CUSTOM_ELEMENTS_SCHEMA],
+  template: `
+    <vise-workflow-editor
+      base-url="/api/workflows"
+      lang="it"
+      heading="Impostazioni"
+      [blocks]="blocks"
+      [hooks]="hooks"
+      [headers]="headers"
+      (saved)="onSaved($event)"
+    ></vise-workflow-editor>
+  `,
+  styles: [`vise-workflow-editor { height: calc(100dvh - 64px); --vwe-primary: var(--primary); }`],
+})
+export class WorkflowSettings {
+  blocks = blocks;
+  hooks = hooks;
+  headers = () => ({ Authorization: `Bearer ${this.auth.token()}` });
+
+  constructor(private auth: AuthService) {
+    // Load the editor in a lazy chunk, outside the app's initial bundle.
+    void import('vise-workflow-engine/element');
+  }
+
+  onSaved(e: Event) {
+    console.log('saved', (e as CustomEvent).detail);
+  }
+}
+```
+
+**Plain HTML** (no build step)
+
+```html
+<script src="https://unpkg.com/vise-workflow-engine/dist/element.global.js"></script>
+<vise-workflow-editor base-url="/api/workflows" style="height: 600px"></vise-workflow-editor>
+<script>
+  const el = document.querySelector('vise-workflow-editor');
+  el.blocks = ViseWorkflowEditor.defineBlocks({ /* … */ });
+  el.headers = () => ({ Authorization: 'Bearer …' });
+  el.addEventListener('saved', (e) => console.log(e.detail));
+</script>
+```
+
+| Attributes | |
+|---|---|
+| `base-url` | exact URL of `createHandler` |
+| `workflow-id` | workflow to open (empty: a new draft) |
+| `lang` | `en` (default) or `it` |
+| `theme` | `light` (default), `dark`, `system` |
+| `heading` | breadcrumb before the workflow name |
+| `read-only`, `hide-attribution` | boolean attributes |
+
+| Properties | |
+|---|---|
+| `blocks` (required), `hooks` | your definitions |
+| `headers` | object or function (may be async), read on every request |
+| `client` | a custom `WorkflowClient` instead of `base-url` (`createHttpClient`, `createLocalClient` are exported here too) |
+| `icons` | SVG markup strings by block or hook id (trusted, from your own code) |
+| `labels` | text overrides on top of `lang` |
+| `value` | controlled mode; listen to `change` |
+
+Events (`CustomEvent`, read `event.detail`): `saved` (workflow), `change` (`{ draft, issues }`), `error`, `deleted` (id), `workflow-id-change` (id). Properties set before the element is defined (lazy loading) are picked up when it upgrades. Theme it by setting `--vwe-*` variables on the tag; dark mode uses its own palette.
 
 ## Editor (`vise-workflow-engine/react`)
 

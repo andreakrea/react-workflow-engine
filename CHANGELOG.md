@@ -19,6 +19,7 @@ A rewrite. Stored data is compatible with 1.x (same `workflows` table and migrat
 - Waits and retries: `{ wait: '3d' }` from actions, `retry` policies on blocks, `engine.runDue` / `engine.startTimers`, migration 003.
 - HTTP: `createHandler` (workflow CRUD) and `createSubjectHandler` (start, move, read, history) as standard fetch handlers, with `toNodeHandler` for Express.
 - Validation with errors and warnings, shown live in the editor and returned by the API.
+- `<vise-workflow-editor>` custom element (`vise-workflow-engine/element`, or `dist/element.global.js` for a script tag) for Angular, Vue and plain HTML: React bundled inside, styles in a shadow root, events as CustomEvents.
 - Editor: injectable client, controlled mode, light/dark/system themes, hooks sidebar, undo/redo, search, mobile bottom sheets, `icons` and `labels` (English and Italian) props.
 - TypeScript types for everything; ESM and CommonJS builds.
 

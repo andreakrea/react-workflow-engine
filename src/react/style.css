@@ -1,12 +1,15 @@
 /*
  * vise-workflow-engine editor.
  * Everything is scoped under .vwe-root; nothing touches the host page.
- * Theme by overriding the variables below on .vwe-root (or any ancestor).
+ * Theme by overriding the --vwe-* variables on .vwe-root or any ancestor (with the
+ * custom element: on <vise-workflow-editor>). Defaults sit on :root / :host, the
+ * lowest level, so values set by the host always win. Dark mode sets its own.
  * Mobile first: phones get bottom sheets, the side columns appear from 768px.
  */
 
 /* ── Tokens ─────────────────────────────────────────────────────────────── */
-.vwe-root {
+:root,
+:host {
   --vwe-font: 'Inter Variable', Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   --vwe-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
@@ -87,10 +90,10 @@
   }
 }
 @media (min-width: 768px) {
-  .vwe-root { --vwe-control-h: 32px; }
+  :root, :host { --vwe-control-h: 32px; }
 }
 @media (pointer: coarse) {
-  .vwe-root { --vwe-control-h: 44px; }
+  :root, :host { --vwe-control-h: 44px; }
 }
 
 /* ── Base ───────────────────────────────────────────────────────────────── */
@@ -583,6 +586,8 @@ textarea.vwe-input { resize: vertical; line-height: 1.45; }
   transition: border-color var(--vwe-ease), box-shadow var(--vwe-ease);
 }
 .vwe-node:hover { border-color: var(--vwe-border-strong); }
+/* Keyboard focus on a node: visible, but distinct from the selection ring. */
+.vwe-root .react-flow__node:focus-visible { outline: 2px dashed var(--vwe-border-strong); outline-offset: 3px; border-radius: var(--vwe-radius); }
 .vwe-node.is-selected { border-color: var(--vwe-focus); box-shadow: 0 0 0 1px var(--vwe-focus), var(--vwe-shadow-xs); }
 .vwe-node.has-error { border-color: var(--vwe-err-border); }
 .vwe-node.has-error.is-selected { border-color: var(--vwe-err); box-shadow: 0 0 0 1px var(--vwe-err); }
