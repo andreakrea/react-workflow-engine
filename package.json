@@ -57,7 +57,8 @@
     "dist",
     "migrations",
     "README.md",
-    "AGENT.md"
+    "AGENT.md",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "tsup && node scripts/build-css.mjs",
