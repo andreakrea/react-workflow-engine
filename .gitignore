@@ -2,3 +2,5 @@ node_modules/
 dist/
 demo/dist/
 .playwright-mcp/
+playwright-report/
+test-results/

@@ -358,7 +358,8 @@ Stored data is compatible: same `workflows` table and migration name, and workfl
 
 ```bash
 npm install
-npm test            # vitest: engine, knex (SQLite), HTTP handler
+npm test            # vitest: engine, knex (SQLite), HTTP handlers
+npm run e2e         # Playwright: builds the demo and drives the editor and simulator (desktop + phone)
 npm run typecheck
 npm run build       # dist/ via tsup
 npm run dev:demo    # demo on the local source
