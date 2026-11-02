@@ -9,6 +9,8 @@ export interface ValidationIssue {
   nodeId?: string;
   edgeId?: string;
   hookId?: string;
+  /** Values used in the message, for translating it: label, type, id, branch, branchLabel, variable. */
+  params?: Record<string, string>;
 }
 
 export interface ValidateOptions {
@@ -68,7 +70,7 @@ export function validateWorkflow(workflow: Workflow | WorkflowInput, opts: Valid
 
   const ids = new Set<string>();
   for (const n of wf.nodes) {
-    if (ids.has(n.id)) err({ code: 'DUPLICATE_ID', message: `Duplicate node id "${n.id}"`, nodeId: n.id });
+    if (ids.has(n.id)) err({ code: 'DUPLICATE_ID', message: `Duplicate node id "${n.id}"`, nodeId: n.id, params: { id: n.id } });
     ids.add(n.id);
   }
 
@@ -88,35 +90,39 @@ export function validateWorkflow(workflow: Workflow | WorkflowInput, opts: Valid
 
   for (const node of wf.nodes) {
     const def = blockOf(node, blocks);
-    const label = node.data?.label || def?.label || node.data?.type;
+    const label = String(node.data?.label || def?.label || node.data?.type);
     if (blocks && !def) {
-      err({ code: 'UNKNOWN_BLOCK', message: `"${node.data?.type}" is not a known block`, nodeId: node.id });
+      err({ code: 'UNKNOWN_BLOCK', message: `"${node.data?.type}" is not a known block`, nodeId: node.id, params: { type: String(node.data?.type) } });
       continue;
     }
     const kind = kindOf(node, blocks);
     const out = outgoing(wf, node.id);
 
-    if (kind === 'end' && out.length) warn({ code: 'END_HAS_EXITS', message: `"${label}" is an end node but has outgoing edges`, nodeId: node.id });
-    if (kind !== 'end' && !out.length) warn({ code: 'DEAD_END', message: `"${label}" has no way forward`, nodeId: node.id });
+    if (kind === 'end' && out.length) warn({ code: 'END_HAS_EXITS', message: `"${label}" is an end node but has outgoing edges`, nodeId: node.id, params: { label } });
+    if (kind !== 'end' && !out.length) warn({ code: 'DEAD_END', message: `"${label}" has no way forward`, nodeId: node.id, params: { label } });
 
     if (kind === 'decision' && def) {
       const allowed = new Set(getBranches(def).map((b) => b.id));
+      // Custom branch labels are the developer's; default yes/no are left for the translator.
+      const custom = new Map(def.branches?.length ? getBranches(def).map((b) => [b.id, b.label ?? b.id] as const) : []);
+      const named = (b: string) => custom.get(b) ?? (b === 'yes' ? 'Yes' : b === 'no' ? 'No' : b);
+      const bp = (b: string) => ({ label, branch: b, branchLabel: custom.get(b) ?? '' });
       const used = new Map<string, number>();
       for (const o of out) {
         const b = o.branch ?? '(none)';
         used.set(b, (used.get(b) ?? 0) + 1);
-        if (!allowed.has(b)) err({ code: 'UNKNOWN_BRANCH', message: `"${label}" has an edge on unknown branch "${b}"`, nodeId: node.id, edgeId: o.edge?.id });
+        if (!allowed.has(b)) err({ code: 'UNKNOWN_BRANCH', message: `"${label}" has an edge on unknown branch "${b}"`, nodeId: node.id, edgeId: o.edge?.id, params: bp(b) });
       }
       for (const b of allowed) {
-        if ((used.get(b) ?? 0) > 1) err({ code: 'DUPLICATE_BRANCH', message: `"${label}" has more than one "${b}" edge`, nodeId: node.id });
-        if (!used.has(b)) warn({ code: 'MISSING_BRANCH', message: `"${label}" has no "${b}" edge`, nodeId: node.id });
+        if ((used.get(b) ?? 0) > 1) err({ code: 'DUPLICATE_BRANCH', message: `"${label}" has more than one "${named(b)}" edge`, nodeId: node.id, params: bp(b) });
+        if (!used.has(b)) warn({ code: 'MISSING_BRANCH', message: `"${label}" has no "${named(b)}" edge`, nodeId: node.id, params: bp(b) });
       }
     }
 
     for (const [name, spec] of Object.entries(def?.variables ?? {})) {
       const val = node.data?.variables?.[name];
       if (spec.required && (val === undefined || val === null || val === '')) {
-        err({ code: 'MISSING_VARIABLE', message: `"${label}": ${spec.label ?? name} is required`, nodeId: node.id });
+        err({ code: 'MISSING_VARIABLE', message: `"${label}": ${spec.label ?? name} is required`, nodeId: node.id, params: { label, variable: spec.label ?? name } });
       }
     }
   }
@@ -133,14 +139,15 @@ export function validateWorkflow(workflow: Workflow | WorkflowInput, opts: Valid
       }
     }
     for (const n of wf.nodes) {
-      if (!seen.has(n.id)) warn({ code: 'UNREACHABLE', message: `"${n.data?.label || blockOf(n, blocks)?.label || n.data?.type}" can never be reached`, nodeId: n.id });
+      const label = String(n.data?.label || blockOf(n, blocks)?.label || n.data?.type);
+      if (!seen.has(n.id)) warn({ code: 'UNREACHABLE', message: `"${label}" can never be reached`, nodeId: n.id, params: { label } });
     }
   }
 
   for (const h of wf.hooks ?? []) {
-    if (hookDefs && !hookDefs[h.type]) err({ code: 'UNKNOWN_HOOK', message: `"${h.type}" is not a known hook`, hookId: h.id });
+    if (hookDefs && !hookDefs[h.type]) err({ code: 'UNKNOWN_HOOK', message: `"${h.type}" is not a known hook`, hookId: h.id, params: { type: h.type } });
     if (Array.isArray(h.scope)) {
-      for (const id of h.scope) if (!ids.has(id)) warn({ code: 'HOOK_SCOPE', message: `Hook "${h.label ?? h.type}" is scoped to a missing node`, hookId: h.id });
+      for (const id of h.scope) if (!ids.has(id)) warn({ code: 'HOOK_SCOPE', message: `Hook "${h.label ?? h.type}" is scoped to a missing node`, hookId: h.id, params: { label: h.label ?? h.type } });
     }
   }
 

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { WorkflowEditor, createLocalClient, type WorkflowId } from 'vise-workflow-engine/react';
+import { WorkflowEditor, createLocalClient, enLabels, itLabels, type WorkflowId } from 'vise-workflow-engine/react';
 import { icons } from './icons';
 import Simulator from './Simulator';
 import { blocks, exampleWorkflow, hooks } from './workflow.config';
@@ -22,6 +22,7 @@ export default function App() {
   const [tab, setTab] = useState<'editor' | 'simulator'>('editor');
   const [workflowId, setWorkflowId] = useStored<WorkflowId | null>('vise-wfe-demo-current', exampleWorkflow.id);
   const [theme, setTheme] = useStored<Theme>('vise-wfe-demo-theme', 'system');
+  const [lang, setLang] = useStored<'en' | 'it'>('vise-wfe-demo-lang', navigator.language.startsWith('it') ? 'it' : 'en');
   const [toast, setToast] = useState<{ text: string; error?: boolean } | null>(null);
   const timer = useRef<number>();
 
@@ -51,6 +52,13 @@ export default function App() {
           ))}
         </nav>
         <div className="demo__right">
+          <div className="demo__seg demo__seg--small" role="radiogroup" aria-label="Language">
+            {(['en', 'it'] as const).map((l) => (
+              <button key={l} type="button" role="radio" aria-checked={lang === l} className={`demo__seg-item${lang === l ? ' is-active' : ''}`} onClick={() => setLang(l)}>
+                {l.toUpperCase()}
+              </button>
+            ))}
+          </div>
           <div className="demo__seg demo__seg--small" role="radiogroup" aria-label="Theme">
             {THEMES.map(([v, label]) => (
               <button key={v} type="button" role="radio" aria-checked={theme === v} className={`demo__seg-item${theme === v ? ' is-active' : ''}`} onClick={() => setTheme(v)}>
@@ -69,6 +77,7 @@ export default function App() {
             icons={icons}
             client={client}
             theme={theme}
+            labels={lang === 'it' ? itLabels : enLabels}
             title="Workflows"
             workflowId={workflowId}
             onWorkflowIdChange={setWorkflowId}

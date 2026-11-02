@@ -1,10 +1,9 @@
 import { memo, type CSSProperties, type ReactNode } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
-import { colorOf, getBranches, type BlockColor, type BlockDef, type BlockKind } from '../core/blocks';
+import { colorOf, getBranches, type BlockColor, type BlockDef } from '../core/blocks';
+import type { EditorLabels } from './labels';
 import { useEditorContext } from './context';
 import type { FlowNode } from './convert';
-
-export const KIND_LABEL: Record<BlockKind, string> = { start: 'Start', step: 'Step', decision: 'Decision', end: 'End' };
 
 /** Icon chip: a custom icon from the `icons` prop, the definition's icon string, or the label's initial. */
 export function IconChip({ id, icon, label, color, size = 'md' }: { id: string; icon?: string; label: string; color?: BlockColor; size?: 'sm' | 'md' }) {
@@ -18,26 +17,27 @@ export function IconChip({ id, icon, label, color, size = 'md' }: { id: string; 
   );
 }
 
-function summary(def: BlockDef | undefined, values: Record<string, unknown>): Array<[string, string]> {
+function summary(def: BlockDef | undefined, values: Record<string, unknown>, L: EditorLabels): Array<[string, string]> {
   const rows: Array<[string, string]> = [];
   for (const [name, spec] of Object.entries(def?.variables ?? {})) {
     const val = values[name];
     if (val === undefined || val === '' || val === null) continue;
-    rows.push([spec.label ?? name, spec.kind === 'boolean' ? (val ? 'Yes' : 'No') : String(val)]);
+    rows.push([spec.label ?? name, spec.kind === 'boolean' ? (val ? L.yes : L.no) : String(val)]);
   }
   return rows.slice(0, 3);
 }
 
 export const BlockNode = memo(function BlockNode({ id, data, selected }: NodeProps<FlowNode>) {
-  const { blocks, issuesByNode } = useEditorContext();
+  const { blocks, issuesByNode, labels: L } = useEditorContext();
   const def = blocks[data.type];
   const kind = def?.kind ?? 'step';
   const issues = issuesByNode.get(id) ?? [];
   const errors = issues.filter((i) => i.level === 'error').length;
-  const branches = getBranches(def);
-  const rows = summary(def, data.variables ?? {});
+  // Default yes/no branches use the editor's language; custom ones keep their labels.
+  const branches = getBranches(def).map((b) => (def?.branches?.length ? b : { ...b, label: b.id === 'yes' ? L.yes : L.no }));
+  const rows = summary(def, data.variables ?? {}, L);
   const label = data.label || def?.label || data.type;
-  const subtitle = !def ? `Unknown block “${data.type}”` : data.label ? def.label : KIND_LABEL[kind];
+  const subtitle = !def ? L.unknownBlock(data.type) : data.label ? def.label : L.kind[kind];
 
   return (
     <div
@@ -54,8 +54,8 @@ export const BlockNode = memo(function BlockNode({ id, data, selected }: NodePro
         {issues.length > 0 && (
           <span
             className={`vwe-node__flag vwe-node__flag--${errors ? 'error' : 'warning'}`}
-            title={issues.map((i) => i.message).join('\n')}
-            aria-label={`${issues.length} issue${issues.length > 1 ? 's' : ''}`}
+            title={issues.map((i) => L.issue(i)).join('\n')}
+            aria-label={L.issues(issues.length)}
           >
             {issues.length}
           </span>

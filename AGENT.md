@@ -44,7 +44,7 @@ import 'vise-workflow-engine/react/style.css';
 const client = createHttpClient({ baseUrl: '/api/workflows', headers: () => ({ Authorization: `Bearer ${token}` }) });
 <div style={{ height: 600 }}><WorkflowEditor blocks={blocks} hooks={hooks} client={client} workflowId={id} onSaved={...} onError={...} /></div>
 ```
-`baseUrl` is the exact mount path (nothing appended). The editor fills its parent; the parent needs a height. Controlled alternative: `value` + `onChange(draft, issues)` without `client`.
+Italian UI: `import { itLabels } from 'vise-workflow-engine/react'` and pass `labels={itLabels}`. `baseUrl` is the exact mount path (nothing appended). The editor fills its parent; the parent needs a height. Controlled alternative: `value` + `onChange(draft, issues)` without `client`.
 
 ## Engine API
 

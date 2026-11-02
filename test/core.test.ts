@@ -424,3 +424,17 @@ describe('waits and retries', () => {
     await expect(engine.start(1, 1)).rejects.toThrow(/no timers store/);
   });
 });
+
+describe('translated validation messages', () => {
+  it('issues carry params so the editor can phrase them in other languages', async () => {
+    const { itLabels } = await import('../src/react/labels');
+    const wf = approvalFlow();
+    wf.nodes[1] = node('n2', 'email', {});
+    wf.edges = wf.edges.filter((e) => e.sourceHandle !== 'no');
+    const issues = validateWorkflow(wf, { blocks, hooks });
+    const it = issues.map((i) => itLabels.issue(i));
+    expect(it).toContain('“Email”: to è obbligatorio');
+    expect(it).toContain('“Approve?” non ha un collegamento “No”');
+    expect(issues.find((i) => i.code === 'MISSING_BRANCH')?.message).toBe('"Approve?" has no "No" edge');
+  });
+});

@@ -3,6 +3,8 @@ export type { WorkflowDraft, WorkflowEditorProps } from './WorkflowEditor';
 export { createHttpClient, createLocalClient, WorkflowClientError } from './client';
 export type { HttpClientOptions, WorkflowClient } from './client';
 export { fromFlow, toFlow } from './convert';
+export { enLabels, itLabels } from './labels';
+export type { EditorLabels } from './labels';
 
 // Re-exported so client code needs a single import.
 export { defineBlocks, defineHooks, v } from '../core/blocks';

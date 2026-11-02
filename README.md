@@ -303,6 +303,7 @@ app.all('/api/workflows/*', (c) => handler(c.req.raw));
 | `title`, `headerActions` | breadcrumb before the workflow name; extra header buttons |
 | `icons` | icons by block or hook id, e.g. `{ send_email: <MailIcon /> }` — otherwise the definition's `icon` string, then the label's initial |
 | `theme` | `'light'` (default), `'dark'`, or `'system'` |
+| `labels` | UI text: `itLabels` (Italian), `enLabels` (default), or override keys — `{ ...itLabels, save: 'Pubblica' }`. Validation messages are translated too (issues carry `params`) |
 | `readOnly`, `className`, `style` | |
 | `hideAttribution` | hides the small React Flow link (please only with a React Flow Pro subscription) |
 

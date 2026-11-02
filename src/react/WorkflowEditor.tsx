@@ -19,6 +19,7 @@ import type { Workflow, WorkflowHook, WorkflowId, WorkflowInput } from '../core/
 import { validateWorkflow, type ValidationIssue } from '../core/validate';
 import type { WorkflowClient } from './client';
 import { EditorContext, type EditorContextValue } from './context';
+import { enLabels, type EditorLabels } from './labels';
 import { createBlockNode, createHook, fromFlow, toFlow, type BlockNodeData, type FlowNode } from './convert';
 import { nodeTypes } from './nodes';
 import { useHistory } from './useHistory';
@@ -57,6 +58,8 @@ export interface WorkflowEditorProps<Id extends WorkflowId = WorkflowId> {
   title?: ReactNode;
   /** Extra buttons in the header, before Save. */
   headerActions?: ReactNode;
+  /** UI text. Use itLabels for Italian, or override single keys: { ...itLabels, save: 'Pubblica' }. */
+  labels?: Partial<EditorLabels>;
   /** Hides the small "React Flow" link. Please only do this with a React Flow Pro subscription. */
   hideAttribution?: boolean;
   /** 'light' (default), 'dark', or 'system' to follow prefers-color-scheme. */
@@ -73,10 +76,10 @@ type Selection = { kind: 'node' | 'hook'; id: string } | null;
 const signature = (name: string, description: string | null, nodes: FlowNode[], edges: Edge[], hooks: WorkflowHook[]) =>
   JSON.stringify({ name, description, ...fromFlow(nodes, edges, hooks) });
 
-const emptyDraft = (blocks: Blocks): WorkflowDraft => {
+const emptyDraft = (blocks: Blocks, name: string): WorkflowDraft => {
   const startType = Object.keys(blocks).find((k) => blocks[k].kind === 'start');
   const nodes = startType ? fromFlow([createBlockNode(startType, blocks, { x: 0, y: 0 })], []).nodes : [];
-  return { name: 'Untitled workflow', description: null, nodes, edges: [], hooks: [] };
+  return { name, description: null, nodes, edges: [], hooks: [] };
 };
 
 const Icon = {
@@ -89,11 +92,12 @@ const Icon = {
 
 function Editor(props: WorkflowEditorProps) {
   const { blocks, hooks: hookDefs = {}, client, readOnly = false } = props;
+  const L = useMemo<EditorLabels>(() => ({ ...enLabels, ...props.labels }), [props.labels]);
   const rf = useReactFlow();
   const [nodes, setNodes, onNodesChange] = useNodesState<FlowNode>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [hookList, setHookList] = useState<WorkflowHook[]>([]);
-  const [name, setName] = useState('Untitled workflow');
+  const [name, setName] = useState(L.untitled);
   const [description, setDescription] = useState<string | null>(null);
   const [currentId, setCurrentId] = useState<WorkflowId | null>(props.workflowId ?? props.value?.id ?? null);
   const [selection, setSelection] = useState<Selection>(null);
@@ -138,7 +142,7 @@ function Editor(props: WorkflowEditorProps) {
     async (id: WorkflowId | null) => {
       setListOpen(false);
       if (id == null || !client) {
-        loadDraft(emptyDraft(blocks));
+        loadDraft(emptyDraft(blocks, L.untitled));
         if (id == null) propsRef.current.onWorkflowIdChange?.(null);
         return;
       }
@@ -151,7 +155,7 @@ function Editor(props: WorkflowEditorProps) {
         reportError(e);
       }
     },
-    [blocks, client, loadDraft, reportError],
+    [blocks, client, loadDraft, reportError, L],
   );
 
   useEffect(() => {
@@ -401,16 +405,16 @@ function Editor(props: WorkflowEditorProps) {
   const selectedNode = selection?.kind === 'node' ? nodes.find((n) => n.id === selection.id) : undefined;
   const selectedHook = selection?.kind === 'hook' ? hookList.find((h) => h.id === selection.id) : undefined;
   const ctx: EditorContextValue = useMemo(
-    () => ({ blocks, hooks: hookDefs, icons: props.icons ?? {}, issuesByNode, readOnly }),
-    [blocks, hookDefs, props.icons, issuesByNode, readOnly],
+    () => ({ blocks, hooks: hookDefs, icons: props.icons ?? {}, issuesByNode, readOnly, labels: L }),
+    [blocks, hookDefs, props.icons, issuesByNode, readOnly, L],
   );
 
   const statusText =
-    status.kind === 'saving' ? 'Saving…'
-    : status.kind === 'loading' ? 'Loading…'
-    : status.kind === 'error' ? `Not saved: ${status.message}`
-    : status.kind === 'saved' && !dirty ? 'All changes saved'
-    : dirty ? 'Unsaved changes'
+    status.kind === 'saving' ? L.saving
+    : status.kind === 'loading' ? L.loading
+    : status.kind === 'error' ? L.notSaved(status.message)
+    : status.kind === 'saved' && !dirty ? L.saved
+    : dirty ? L.unsaved
     : '';
 
   const focusIssue = (i: ValidationIssue) => {
@@ -435,7 +439,7 @@ function Editor(props: WorkflowEditorProps) {
             )}
             <input
               className="vwe-name"
-              aria-label="Workflow name"
+              aria-label={L.workflowName}
               value={name}
               disabled={readOnly}
               onChange={(e) => {
@@ -448,32 +452,32 @@ function Editor(props: WorkflowEditorProps) {
           <div className="vwe-bar__right">
             {!readOnly && (
               <div className="vwe-btn-group">
-                <button type="button" className="vwe-icon-btn" onClick={history.undo} disabled={!history.canUndo} aria-label="Undo" title="Undo (Ctrl+Z)">{Icon.undo}</button>
-                <button type="button" className="vwe-icon-btn" onClick={history.redo} disabled={!history.canRedo} aria-label="Redo" title="Redo (Ctrl+Shift+Z)">{Icon.redo}</button>
+                <button type="button" className="vwe-icon-btn" onClick={history.undo} disabled={!history.canUndo} aria-label={L.undo} title={`${L.undo} (Ctrl+Z)`}>{Icon.undo}</button>
+                <button type="button" className="vwe-icon-btn" onClick={history.redo} disabled={!history.canRedo} aria-label={L.redo} title={`${L.redo} (Ctrl+Shift+Z)`}>{Icon.redo}</button>
               </div>
             )}
             {!readOnly && (
               <button type="button" className="vwe-btn vwe-only-mobile" aria-expanded={sheetOpen} onClick={() => setSheetOpen((o) => !o)}>
-                {Icon.plus} Add
+                {Icon.plus} {L.add}
               </button>
             )}
             {issues.length > 0 && (
               <button type="button" className={`vwe-pill${errorCount ? ' is-error' : ' is-warning'}`} aria-expanded={issuesOpen} onClick={() => setIssuesOpen((o) => !o)}>
-                <span className="vwe-pill__label">Problems</span>
-                <span className="vwe-pill__value">{errorCount ? `${errorCount} error${errorCount > 1 ? 's' : ''}` : `${issues.length} warning${issues.length > 1 ? 's' : ''}`}</span>
+                <span className="vwe-pill__label">{L.problems}</span>
+                <span className="vwe-pill__value">{errorCount ? L.errors(errorCount) : L.warnings(issues.length)}</span>
                 {Icon.chevron}
               </button>
             )}
             {client && (
               <button type="button" className="vwe-btn" aria-expanded={listOpen} onClick={() => setListOpen((o) => !o)}>
                 {Icon.list}
-                <span className="vwe-hide-mobile">Workflows</span>
+                <span className="vwe-hide-mobile">{L.workflows}</span>
               </button>
             )}
             {props.headerActions}
             {client && !readOnly && (
               <button type="button" className="vwe-btn vwe-btn--primary" disabled={!dirty || status.kind === 'saving'} onClick={() => void save()}>
-                Save
+                {L.save}
               </button>
             )}
           </div>
@@ -489,19 +493,19 @@ function Editor(props: WorkflowEditorProps) {
             />
           )}
           {issuesOpen && issues.length > 0 && (
-            <div className="vwe-popover vwe-popover--issues" role="dialog" aria-label="Problems">
+            <div className="vwe-popover vwe-popover--issues" role="dialog" aria-label={L.problems}>
               <div className="vwe-popover__head">
-                <strong>Problems</strong>
-                <span className="vwe-muted">Workflows with errors can be saved but not run.</span>
+                <strong>{L.problems}</strong>
+                <span className="vwe-muted">{L.problemsHint}</span>
               </div>
               <ul className="vwe-issues vwe-pad">
                 {issues.map((i, k) => (
                   <li key={k} className={`vwe-issue vwe-issue--${i.level}`}>
-                    <span className="vwe-issue__tag">{i.level === 'error' ? 'Error' : 'Warning'}</span>
+                    <span className="vwe-issue__tag">{i.level === 'error' ? L.error : L.warning}</span>
                     {i.nodeId || i.hookId ? (
-                      <button type="button" className="vwe-link" onClick={() => focusIssue(i)}>{i.message}</button>
+                      <button type="button" className="vwe-link" onClick={() => focusIssue(i)}>{L.issue(i)}</button>
                     ) : (
-                      i.message
+                      L.issue(i)
                     )}
                   </li>
                 ))}
@@ -570,8 +574,8 @@ function Editor(props: WorkflowEditorProps) {
             </ReactFlow>
             {nodes.length === 0 && !readOnly && (
               <div className="vwe-empty">
-                <strong>This workflow is empty</strong>
-                <span>Add a start block from the list on the left, then connect the next steps.</span>
+                <strong>{L.emptyTitle}</strong>
+                <span>{L.emptyText}</span>
               </div>
             )}
           </div>
@@ -597,7 +601,7 @@ function Editor(props: WorkflowEditorProps) {
               />
             </div>
           )}
-          {sheetOpen && <button type="button" className="vwe-scrim vwe-only-mobile" aria-label="Close" onClick={() => setSheetOpen(false)} />}
+          {sheetOpen && <button type="button" className="vwe-scrim vwe-only-mobile" aria-label={L.close} onClick={() => setSheetOpen(false)} />}
         </div>
       </div>
     </EditorContext.Provider>

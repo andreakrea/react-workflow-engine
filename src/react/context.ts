@@ -1,6 +1,7 @@
 import { createContext, useContext, type ReactNode } from 'react';
 import type { Blocks, Hooks } from '../core/blocks';
 import type { ValidationIssue } from '../core/validate';
+import { enLabels, type EditorLabels } from './labels';
 
 export interface EditorContextValue {
   blocks: Blocks;
@@ -8,6 +9,7 @@ export interface EditorContextValue {
   icons: Partial<Record<string, ReactNode>>;
   issuesByNode: Map<string, ValidationIssue[]>;
   readOnly: boolean;
+  labels: EditorLabels;
 }
 
 export const EditorContext = createContext<EditorContextValue>({
@@ -16,6 +18,7 @@ export const EditorContext = createContext<EditorContextValue>({
   icons: {},
   issuesByNode: new Map(),
   readOnly: false,
+  labels: enLabels,
 });
 
 export const useEditorContext = () => useContext(EditorContext);
