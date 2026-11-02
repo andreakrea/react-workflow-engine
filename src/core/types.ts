@@ -104,6 +104,26 @@ export interface SubjectStore<S extends Subject = Subject> {
   setState(id: Subject['id'], state: SubjectState, tx?: unknown): Promise<void>;
 }
 
+/** One move of one subject, recorded by the engine when a history store is configured. */
+export interface HistoryEntry {
+  id?: string | number;
+  subjectId: Subject['id'];
+  workflowId: WorkflowId;
+  /** Node left (null when the workflow started). */
+  from: string | null;
+  to: string;
+  branch: string | null;
+  /** Who caused it (MoveOptions.actor); null for automatic steps and unknown callers. */
+  actor: string | null;
+  at: string;
+}
+
+export interface HistoryStore {
+  append(entry: HistoryEntry, tx?: unknown): Promise<void>;
+  /** Oldest first. */
+  list(subjectId: Subject['id'], opts?: { limit?: number }): Promise<HistoryEntry[]>;
+}
+
 export type TransactionRunner = <T>(fn: (tx: unknown) => Promise<T>) => Promise<T>;
 
 export interface Logger {

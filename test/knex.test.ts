@@ -1,7 +1,7 @@
 import knexFactory, { type Knex } from 'knex';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createEngine, defineBlocks, type WorkflowInput } from '../src';
-import { createWorkflowsTable, knexStores, migrationsPath } from '../src/knex';
+import { createWorkflowHistoryTable, createWorkflowsTable, knexStores, migrationsPath } from '../src/knex';
 import { activateTestLicense } from './helpers';
 
 let knex: Knex;
@@ -32,6 +32,7 @@ beforeAll(async () => {
   activateTestLicense();
   knex = knexFactory({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
   await createWorkflowsTable(knex, { extend: (t) => t.integer('tenant_id') });
+  await createWorkflowHistoryTable(knex);
   await knex.schema.createTable('tickets', (t) => {
     t.increments('id');
     t.string('subject_line');
@@ -93,6 +94,22 @@ describe('knex adapter', () => {
     });
     await expect(engine.start(id, wf.id)).rejects.toMatchObject({ code: 'ACTION_FAILED' });
     expect(await knex('tickets').where({ id }).first()).toMatchObject({ workflow_id: null, current_node_id: null });
+  });
+
+  it('writes history in the same transaction as the move', async () => {
+    const stores = knexStores(knex, { subjects: { table: 'tickets' }, history: true });
+    const wf = await stores.workflows.create(flow);
+    const [{ id }] = await knex('tickets').insert({ subject_line: 'h', priority: 9 }).returning('id');
+    const engine = createEngine({ ...stores, blocks, logger: {}, actions: { start: () => ({ next: true }), triage: () => ({ branch: 'human' }) } });
+    await engine.start(id, wf.id, { actor: 'agent-7' });
+    const h = await engine.history(id);
+    expect(h.map((e) => `${e.from}>${e.to}:${e.branch ?? ''}:${e.actor ?? ''}`)).toEqual(['null>a::agent-7', 'a>b::', 'b>d:human:']);
+    expect(h[0].at).toMatch(/^\d{4}-/);
+
+    const failing = createEngine({ ...stores, blocks, logger: {}, actions: { start: () => { throw new Error('boom'); } } });
+    const [{ id: id2 }] = await knex('tickets').insert({ subject_line: 'x', priority: 1 }).returning('id');
+    await expect(failing.start(id2, wf.id)).rejects.toMatchObject({ code: 'ACTION_FAILED' });
+    expect(await engine.history(id2)).toEqual([]);
   });
 
   it('exposes the bundled 1.x migration directory', () => {

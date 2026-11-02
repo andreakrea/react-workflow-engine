@@ -3,6 +3,8 @@ import { WorkflowError, isWorkflowError } from './errors';
 import { blockOf, findStartNode, getNode, isTerminal, outgoing, resolveMove, type Move, type Step } from './graph';
 import { needsLicense, requireLicense } from './license';
 import type {
+  HistoryEntry,
+  HistoryStore,
   HookTrigger,
   Logger,
   Subject,
@@ -34,6 +36,8 @@ export interface ActionContext<V = Record<string, any>, S extends Subject = Subj
   workflow: Workflow;
   /** Whatever the caller passed as `input` to start / move. */
   input: Record<string, unknown>;
+  /** MoveOptions.actor of the call that led here. */
+  actor: string | null;
   /** The open transaction (when the engine has a `transaction` runner). */
   tx: unknown;
 }
@@ -84,6 +88,8 @@ export interface EngineOptions<B extends Blocks, H extends Hooks, S extends Subj
   subjects: SubjectStore<S>;
   /** Wraps every start / move in one transaction (state + your handlers). */
   transaction?: TransactionRunner;
+  /** Records every move (from, to, branch, actor, time). Read it with engine.history(). */
+  history?: HistoryStore;
   /** Block definitions shared with the editor. Enables typed actions and validation. */
   blocks?: B;
   /** Hook definitions shared with the editor. */
@@ -98,6 +104,8 @@ export interface EngineOptions<B extends Blocks, H extends Hooks, S extends Subj
 
 export interface MoveOptions {
   input?: Record<string, unknown>;
+  /** Who is making the move (user id, 'system', ...). Stored in history and passed to handlers. */
+  actor?: string | null;
 }
 
 export interface RunResult<S extends Subject = Subject> {
@@ -117,8 +125,16 @@ export interface NextOption {
   branchLabel: string | null;
 }
 
+export interface SubjectView<S extends Subject = Subject> {
+  subject: S;
+  /** Current node, or null before start. */
+  node: NodeInfo | null;
+  next: NextOption[];
+  status: 'not_started' | 'waiting' | 'completed';
+}
+
 export interface EngineEvents {
-  transitioned: { subjectId: Subject['id']; workflowId: WorkflowId; from: string | null; to: string; branch: string | null };
+  transitioned: { subjectId: Subject['id']; workflowId: WorkflowId; from: string | null; to: string; branch: string | null; actor: string | null };
   completed: { subjectId: Subject['id']; workflowId: WorkflowId; nodeId: string };
   actionError: { subjectId: Subject['id']; nodeId: string; error: unknown };
   hookError: { subjectId: Subject['id']; hookId: string; trigger: HookTrigger; error: unknown };
@@ -132,6 +148,10 @@ export interface Engine<B extends Blocks = Blocks, S extends Subject = Subject> 
   move(subjectId: S['id'], move: Move, opts?: MoveOptions): Promise<RunResult<S>>;
   /** Valid next steps from the subject's current node. */
   next(subjectId: S['id']): Promise<NextOption[]>;
+  /** Where a subject is and what can happen next, in one call. */
+  get(subjectId: S['id']): Promise<SubjectView<S>>;
+  /** Recorded moves, oldest first ([] without a history store). */
+  history(subjectId: S['id'], opts?: { limit?: number }): Promise<HistoryEntry[]>;
   can(subjectId: S['id'], move: Move): Promise<boolean>;
   /** Fires hooks for any trigger (e.g. 'on_message') at the subject's current node. */
   emit(subjectId: S['id'], trigger: HookTrigger, input?: Record<string, unknown>): Promise<{ fired: number; failed: number }>;
@@ -144,7 +164,7 @@ export interface Engine<B extends Blocks = Blocks, S extends Subject = Subject> 
 export function createEngine<const B extends Blocks, const H extends Hooks, S extends Subject>(
   options: EngineOptions<B, H, S>,
 ): Engine<B, S> {
-  const { workflows, subjects, transaction, blocks, hooks: hookDefs, maxSteps = 100 } = options;
+  const { workflows, subjects, transaction, history, blocks, hooks: hookDefs, maxSteps = 100 } = options;
   if (!workflows) throw new TypeError('createEngine: `workflows` store is required');
   if (!subjects) throw new TypeError('createEngine: `subjects` store is required');
   if (options.licenseKey || needsLicense(workflows, subjects)) requireLicense('createEngine', options.licenseKey);
@@ -247,7 +267,7 @@ export function createEngine<const B extends Blocks, const H extends Hooks, S ex
   }
 
   /** Enters `first`, runs hooks and the action, and keeps going while actions return a move. */
-  async function walk(subject: S, workflow: Workflow, from: WorkflowNode | null, first: Step, input: Record<string, unknown>, tx: unknown): Promise<RunResult<S>> {
+  async function walk(subject: S, workflow: Workflow, from: WorkflowNode | null, first: Step, input: Record<string, unknown>, actor: string | null, tx: unknown): Promise<RunResult<S>> {
     const path: string[] = [];
     let current = from;
     let step: Step | null = first;
@@ -264,7 +284,11 @@ export function createEngine<const B extends Blocks, const H extends Hooks, S ex
       await subjects.setState(subject.id, { workflowId: workflow.id, nodeId: target.id, nodeType: target.data?.type }, tx);
       subject = { ...subject, workflowId: workflow.id, nodeId: target.id };
       path.push(target.id);
-      fire('transitioned', { subjectId: subject.id, workflowId: workflow.id, from: current?.id ?? null, to: target.id, branch: step.branch });
+      // Only the first step is the caller's; later ones are the engine following actions.
+      const by = path.length === 1 ? actor : null;
+      const entry = { subjectId: subject.id, workflowId: workflow.id, from: current?.id ?? null, to: target.id, branch: step.branch, actor: by };
+      if (history) await history.append({ ...entry, at: new Date().toISOString() }, tx);
+      fire('transitioned', entry);
 
       if (current) await runHooks('on_transition', target, { subject, ...ctx });
       await runHooks('on_node_entry', target, { subject, ...ctx });
@@ -273,7 +297,7 @@ export function createEngine<const B extends Blocks, const H extends Hooks, S ex
       let result: ActionResult;
       try {
         result = action
-          ? await action({ subject, node: info(target), variables: { ...(target.data?.variables ?? {}) }, workflow, input, tx })
+          ? await action({ subject, node: info(target), variables: { ...(target.data?.variables ?? {}) }, workflow, input, actor, tx })
           : undefined;
       } catch (error) {
         fire('actionError', { subjectId: subject.id, nodeId: target.id, error });
@@ -305,15 +329,28 @@ export function createEngine<const B extends Blocks, const H extends Hooks, S ex
         }
         const start = findStartNode(workflow, blocks);
         if (!start) throw new WorkflowError('NO_START_NODE', `Workflow ${workflowId} has no start node`);
-        return walk(subject, workflow, null, { node: start, edge: null, branch: null }, opts.input ?? {}, tx);
+        return walk(subject, workflow, null, { node: start, edge: null, branch: null }, opts.input ?? {}, opts.actor ?? null, tx);
       });
     },
 
     move(subjectId, move, opts = {}) {
       return run(async (tx) => {
         const { subject, workflow, node } = await load(subjectId, tx);
-        return walk(subject, workflow, node, resolveMove(workflow, node.id, move), opts.input ?? {}, tx);
+        return walk(subject, workflow, node, resolveMove(workflow, node.id, move), opts.input ?? {}, opts.actor ?? null, tx);
       });
+    },
+
+    async get(subjectId) {
+      const subject = await getSubject(subjectId, undefined);
+      if (subject.workflowId == null || subject.nodeId == null) return { subject, node: null, next: [], status: 'not_started' };
+      const workflow = await getWorkflow(subject.workflowId, undefined);
+      const node = getNode(workflow, subject.nodeId);
+      if (!node) throw new WorkflowError('NODE_NOT_FOUND', `Subject ${subjectId} is on node "${subject.nodeId}", which no longer exists`, { subjectId });
+      return { subject, node: info(node), next: await engine.next(subjectId), status: isTerminal(workflow, node, blocks) ? 'completed' : 'waiting' };
+    },
+
+    async history(subjectId, opts) {
+      return history ? history.list(subjectId, opts) : [];
     },
 
     async next(subjectId) {

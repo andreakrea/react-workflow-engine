@@ -12,6 +12,7 @@ export type {
   NextOption,
   NodeInfo,
   RunResult,
+  SubjectView,
 } from './core/engine';
 
 export { defineBlocks, defineHooks, v, getBranches, defaultVariableValues, colorOf, DEFAULT_BRANCHES } from './core/blocks';
@@ -39,7 +40,7 @@ export type { ValidationIssue, ValidateOptions } from './core/validate';
 export { WorkflowError, isWorkflowError } from './core/errors';
 export type { WorkflowErrorCode } from './core/errors';
 
-export { memoryStores, memoryWorkflowStore, memorySubjectStore } from './core/memory';
+export { memoryStores, memoryWorkflowStore, memorySubjectStore, memoryHistoryStore } from './core/memory';
 export type { MemorySubjectStore, MemoryWorkflowStore } from './core/memory';
 
 export { validateLicense, checkLicense, getLicenseInfo } from './core/license';

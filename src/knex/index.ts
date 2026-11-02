@@ -2,6 +2,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Knex } from 'knex';
 import type {
+  HistoryEntry,
+  HistoryStore,
   Scope,
   Subject,
   SubjectStore,
@@ -143,6 +145,57 @@ export function knexSubjectStore<S extends Subject = Subject>(knex: Knex, opts: 
   };
 }
 
+// ─── History ──────────────────────────────────────────────────────────────────
+
+/** Move history in the `workflow_history` table (bundled migration 002, or createWorkflowHistoryTable). */
+export function knexHistoryStore(knex: Knex, opts: { table?: string } = {}): HistoryStore {
+  const table = opts.table ?? 'workflow_history';
+  return {
+    async append(e, tx) {
+      await db(knex, tx)(table).insert({
+        subject_id: String(e.subjectId),
+        workflow_id: String(e.workflowId),
+        from_node: e.from,
+        to_node: e.to,
+        branch: e.branch,
+        actor: e.actor,
+        created_at: e.at,
+      });
+    },
+    async list(subjectId, { limit } = {}) {
+      let q = knex(table).where({ subject_id: String(subjectId) }).orderBy('id', 'desc');
+      if (limit) q = q.limit(limit);
+      const rows: Array<Record<string, any>> = await q;
+      return rows.reverse().map(
+        (r): HistoryEntry => ({
+          id: r.id,
+          subjectId: r.subject_id,
+          workflowId: r.workflow_id,
+          from: r.from_node ?? null,
+          to: r.to_node,
+          branch: r.branch ?? null,
+          actor: r.actor ?? null,
+          at: new Date(r.created_at).toISOString(),
+        }),
+      );
+    },
+  };
+}
+
+export async function createWorkflowHistoryTable(knex: Knex, opts: { table?: string } = {}) {
+  await knex.schema.createTable(opts.table ?? 'workflow_history', (t) => {
+    t.bigIncrements('id').primary();
+    t.string('subject_id').notNullable();
+    t.string('workflow_id').notNullable();
+    t.string('from_node');
+    t.string('to_node').notNullable();
+    t.string('branch');
+    t.string('actor');
+    t.timestamp('created_at', { useTz: true }).notNullable().defaultTo(knex.fn.now());
+    t.index(['subject_id', 'id']);
+  });
+}
+
 export function knexTransaction(knex: Knex): TransactionRunner {
   return (fn) => knex.transaction((trx) => fn(trx));
 }
@@ -154,11 +207,18 @@ export function knexTransaction(knex: Knex): TransactionRunner {
  */
 export function knexStores<S extends Subject = Subject>(
   knex: Knex,
-  opts: { workflows?: KnexWorkflowStoreOptions; subjects: KnexSubjectStoreOptions<S>; transaction?: boolean },
-): { workflows: WorkflowStore; subjects: SubjectStore<S>; transaction?: TransactionRunner } {
+  opts: {
+    workflows?: KnexWorkflowStoreOptions;
+    subjects: KnexSubjectStoreOptions<S>;
+    /** Record every move in workflow_history (run migration 002 first). */
+    history?: boolean | { table?: string };
+    transaction?: boolean;
+  },
+): { workflows: WorkflowStore; subjects: SubjectStore<S>; history?: HistoryStore; transaction?: TransactionRunner } {
   return {
     workflows: knexWorkflowStore(knex, opts.workflows),
     subjects: knexSubjectStore<S>(knex, opts.subjects),
+    history: opts.history ? knexHistoryStore(knex, opts.history === true ? {} : opts.history) : undefined,
     transaction: opts.transaction === false ? undefined : knexTransaction(knex),
   };
 }

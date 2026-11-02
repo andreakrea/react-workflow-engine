@@ -2,8 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   createEngine,
   isWorkflowError,
+  memoryHistoryStore,
   memorySubjectStore,
   memoryWorkflowStore,
+  type HistoryEntry,
   type NextOption,
   type Workflow,
   type WorkflowId,
@@ -27,6 +29,7 @@ export default function Simulator({ client, initialWorkflowId }: { client: Workf
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [options, setOptions] = useState<Record<number, NextOption[]>>({});
   const [log, setLog] = useState<Log[]>([]);
+  const [openHistory, setOpenHistory] = useState<{ id: number; entries: HistoryEntry[] } | null>(null);
   const nextTicket = useRef(1);
 
   useEffect(() => {
@@ -40,6 +43,7 @@ export default function Simulator({ client, initialWorkflowId }: { client: Workf
     const engine = createEngine({
       workflows: memoryWorkflowStore(workflows),
       subjects,
+      history: memoryHistoryStore(),
       blocks,
       hooks,
       actions: {
@@ -99,7 +103,7 @@ export default function Simulator({ client, initialWorkflowId }: { client: Workf
       subjects.add(t);
       setTickets((ts) => [...ts, t]);
       push('info', `#${id} created: “${t.title}”, ${t.priority} priority`);
-      await engine.start(id, workflowId);
+      await engine.start(id, workflowId, { actor: 'you' });
       await refresh(id);
     });
 
@@ -159,7 +163,7 @@ export default function Simulator({ client, initialWorkflowId }: { client: Workf
                             key={`${o.nodeId}:${o.branch}`}
                             type="button"
                             className="sim__btn sim__btn--sm"
-                            onClick={() => void run(async () => { await engine.move(t.id, o.branch ? { branch: o.branch } : { to: o.nodeId }); await refresh(t.id); })}
+                            onClick={() => void run(async () => { await engine.move(t.id, o.branch ? { branch: o.branch } : { to: o.nodeId }, { actor: 'you' }); await refresh(t.id); })}
                           >
                             {o.branchLabel ? `${o.branchLabel} → ` : 'Continue → '}{o.label}
                           </button>
@@ -168,6 +172,27 @@ export default function Simulator({ client, initialWorkflowId }: { client: Workf
                           Simulate message
                         </button>
                       </div>
+                    )}
+                    <div>
+                      <button
+                        type="button"
+                        className="sim__btn sim__btn--sm sim__btn--ghost"
+                        aria-expanded={openHistory?.id === t.id}
+                        onClick={() => void (openHistory?.id === t.id ? setOpenHistory(null) : engine.history(t.id).then((entries) => setOpenHistory({ id: t.id, entries })))}
+                      >
+                        {openHistory?.id === t.id ? 'Hide history' : 'History'}
+                      </button>
+                    </div>
+                    {openHistory?.id === t.id && (
+                      <ol className="sim__history">
+                        {openHistory.entries.map((h) => (
+                          <li key={String(h.id)}>
+                            <time>{new Date(h.at).toLocaleTimeString([], { hour12: false })}</time>
+                            <span>{h.from ? `${label(h.from)} → ` : 'Started at '}<b>{label(h.to)}</b>{h.branch ? ` (${h.branch})` : ''}</span>
+                            <span className="sim__muted">{h.actor ?? 'automatic'}</span>
+                          </li>
+                        ))}
+                      </ol>
                     )}
                   </li>
                 );

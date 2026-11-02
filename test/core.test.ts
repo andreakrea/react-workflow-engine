@@ -321,3 +321,21 @@ export function typeChecks() {
   // @ts-expect-error typo in block id
   createEngine({ ...stores, blocks, actions: { emial: () => {} } });
 }
+
+describe('history and get()', () => {
+  it('records each move with its actor; automatic steps have none', async () => {
+    const { engine } = setup(approvalFlow(), { actions: { start: () => ({ next: true }) } });
+    await engine.start(1, 1, { actor: 'alice' });
+    await engine.move(1, { next: true }, { actor: 'bob' });
+    const h = await engine.history(1);
+    expect(h.map((e) => [e.from, e.to, e.actor])).toEqual([[null, 'n1', 'alice'], ['n1', 'n2', null], ['n2', 'n3', 'bob']]);
+    expect((await engine.history(1, { limit: 1 }))[0].to).toBe('n3');
+  });
+
+  it('get() says where a subject is and what can happen next', async () => {
+    const { engine } = setup();
+    expect(await engine.get(1)).toMatchObject({ node: null, next: [], status: 'not_started' });
+    await engine.start(1, 1);
+    expect(await engine.get(1)).toMatchObject({ node: { id: 'n1', label: 'Start' }, status: 'waiting', next: [{ nodeId: 'n2' }] });
+  });
+});

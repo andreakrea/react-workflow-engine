@@ -54,10 +54,16 @@ const client = createHttpClient({ baseUrl: '/api/workflows', headers: () => ({ A
 - `engine.emit(subjectId, trigger, input)` — runs hooks for e.g. `'on_message'`
 - `engine.on('transitioned' | 'completed' | 'actionError' | 'hookError' | 'hookExecuted', fn)`
 - `engine.validate(workflow)` → `ValidationIssue[]`
+- `engine.get(subjectId)` → `{ subject, node, next, status }`; `engine.history(subjectId)` → moves `{ from, to, branch, actor, at }` (needs `history: true` in knexStores + migration 002)
+- MoveOptions: `{ input?, actor? }`
 
 Action context: `{ subject, node, variables, workflow, input, tx }`. Return nothing (wait), `{ next: true }`, `{ branch }`, or `{ to }`. Hook context: `{ subject, hook, config, trigger, node, from, to, workflow, input, tx }`.
 
 Per step: `on_node_exit` → persist → `on_transition` → `on_node_entry` → action. Errors are `WorkflowError` with `code` (`INVALID_TRANSITION`, `AMBIGUOUS_TRANSITION`, `ACTION_FAILED`, `MAX_STEPS`, `NO_WORKFLOW`, `SUBJECT_NOT_FOUND`, `WORKFLOW_NOT_FOUND`, `INVALID_WORKFLOW`); check with `isWorkflowError`. With knexStores each call is one transaction with the subject row locked.
+
+## Subject routes
+
+`app.use('/api/tickets', auth, toNodeHandler(createSubjectHandler({ engine, actor: (_r, { req }) => req.user.id })))` → `GET /:id`, `GET /:id/history`, `POST /:id/start {workflowId}`, `POST /:id/move {next|branch|to}`, `POST /:id/emit {trigger}`. Engine errors → 404/409/500 with `{ error: { code, message, details } }`.
 
 ## Data
 

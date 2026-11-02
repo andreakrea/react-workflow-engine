@@ -170,3 +170,8 @@ button, select { font: inherit; color: inherit; }
   .demo__tag { display: none; }
   .demo__bar { flex-wrap: nowrap; justify-content: space-between; }
 }
+.sim__history { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; border: 1px solid var(--d-border); border-radius: 6px; }
+.sim__history li { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--d-border); }
+.sim__history li:last-child { border-bottom: 0; }
+.sim__history time { color: var(--d-muted); font-variant-numeric: tabular-nums; }
+.sim__history b { color: var(--d-text); font-weight: 500; }

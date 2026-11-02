@@ -1,4 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { Engine } from '../core/engine';
+import { isWorkflowError, type WorkflowErrorCode } from '../core/errors';
+import type { Move } from '../core/graph';
 import { needsLicense, requireLicense } from '../core/license';
 import type { Scope, WorkflowStore } from '../core/types';
 import { checkShape, type ValidationIssue } from '../core/validate';
@@ -120,6 +123,121 @@ export function createHandler<C = any>(options: HandlerOptions<C>): WorkflowHand
     } catch (error) {
       if (onError) onError(error);
       else console.error('vise-workflow-engine: request failed', error);
+      return fail(500, 'INTERNAL', 'Internal error');
+    }
+  }
+
+  return Object.assign(handle, { GET: handle, POST: handle, PUT: handle, PATCH: handle, DELETE: handle });
+}
+
+// ─── Subjects (start / move / read / history) ─────────────────────────────────
+
+export type SubjectAction = 'read' | 'history' | 'start' | 'move' | 'force' | 'emit';
+
+export interface SubjectHandlerOptions<C = any> {
+  engine: Engine<any, any>;
+  /** Return false to answer 403. `force` (moving to any node) is refused unless this allows it. */
+  authorize?: (request: Request, action: SubjectAction, ctx: C) => boolean | Promise<boolean>;
+  /** Who is acting — stored in history and passed to handlers as `actor`. */
+  actor?: (request: Request, ctx: C) => string | null | undefined | Promise<string | null | undefined>;
+  /** Restrict which subjects a caller may touch (e.g. same tenant). Return false for 404. */
+  canAccess?: (request: Request, subjectId: string, ctx: C) => boolean | Promise<boolean>;
+  basePath?: string;
+  onError?: (error: unknown) => void;
+}
+
+const STATUS_BY_CODE: Partial<Record<WorkflowErrorCode, number>> = {
+  SUBJECT_NOT_FOUND: 404,
+  WORKFLOW_NOT_FOUND: 404,
+  NODE_NOT_FOUND: 409,
+  NO_WORKFLOW: 409,
+  NO_START_NODE: 409,
+  INVALID_WORKFLOW: 409,
+  INVALID_TRANSITION: 409,
+  AMBIGUOUS_TRANSITION: 409,
+  MAX_STEPS: 500,
+  ACTION_FAILED: 500,
+};
+
+/**
+ * Drives subjects through workflows over HTTP:
+ *
+ *   GET  /:id          → { subject, node, next, status }
+ *   GET  /:id/history  → { history }
+ *   POST /:id/start    body { workflowId, input? }                      → { subject, node, path, status }
+ *   POST /:id/move     body { next: true } | { branch } | { to, force? }, plus input? → same
+ *   POST /:id/emit     body { trigger, input? }                          → { fired, failed }
+ *   errors             → { error: { code, message, details? } } (404 / 409 / 400 / 403 / 500)
+ */
+export function createSubjectHandler<C = any>(options: SubjectHandlerOptions<C>): WorkflowHandler<C> {
+  const { engine, authorize, actor, canAccess, onError } = options;
+  if (!engine) throw new TypeError('createSubjectHandler: `engine` is required');
+  const base = (options.basePath ?? '').replace(/\/+$/, '');
+
+  async function handle(request: Request, ctx?: C): Promise<Response> {
+    try {
+      let path = new URL(request.url).pathname;
+      if (base && path.startsWith(base)) path = path.slice(base.length);
+      const [rawId, verb, ...rest] = path.split('/').filter(Boolean);
+      if (!rawId || rest.length) return fail(404, 'NOT_FOUND', 'Not found');
+      const id = decodeURIComponent(rawId);
+      const method = request.method.toUpperCase();
+
+      const action: SubjectAction | null =
+        method === 'GET' && !verb ? 'read'
+        : method === 'GET' && verb === 'history' ? 'history'
+        : method === 'POST' && (verb === 'start' || verb === 'move' || verb === 'emit') ? verb
+        : null;
+      if (!action) return fail(405, 'METHOD_NOT_ALLOWED', `${method} ${verb ? `/:id/${verb}` : '/:id'} is not supported`);
+      if (canAccess && !(await canAccess(request, id, ctx as C))) return fail(404, 'SUBJECT_NOT_FOUND', 'Subject not found');
+      if (authorize && !(await authorize(request, action, ctx as C))) return fail(403, 'FORBIDDEN', 'Not allowed');
+
+      if (action === 'read') return json(200, await engine.get(id));
+      if (action === 'history') {
+        const limit = Number(new URL(request.url).searchParams.get('limit')) || undefined;
+        return json(200, { history: await engine.history(id, { limit }) });
+      }
+
+      let body: Record<string, any>;
+      try {
+        body = (await request.json()) as Record<string, any>;
+      } catch {
+        return fail(400, 'INVALID_BODY', 'Body must be JSON');
+      }
+      if (!body || typeof body !== 'object') return fail(400, 'INVALID_BODY', 'Body must be a JSON object');
+      const input = body.input && typeof body.input === 'object' ? body.input : undefined;
+      const by = actor ? ((await actor(request, ctx as C)) ?? null) : null;
+
+      if (action === 'start') {
+        if (body.workflowId == null) return fail(400, 'INVALID_BODY', 'workflowId is required');
+        return json(200, await engine.start(id, body.workflowId, { input, actor: by }));
+      }
+      if (action === 'emit') {
+        if (typeof body.trigger !== 'string') return fail(400, 'INVALID_BODY', 'trigger is required');
+        return json(200, await engine.emit(id, body.trigger, input));
+      }
+
+      const given = ['to', 'branch', 'next'].filter((k) => body[k] !== undefined);
+      if (given.length !== 1) return fail(400, 'INVALID_BODY', 'Pass exactly one of: to, branch, next');
+      let move: Move;
+      if (body.to !== undefined) {
+        if (typeof body.to !== 'string') return fail(400, 'INVALID_BODY', 'to must be a string');
+        if (body.force && !(authorize && (await authorize(request, 'force', ctx as C)))) return fail(403, 'FORBIDDEN', 'Forced moves are not allowed');
+        move = { to: body.to, force: !!body.force };
+      } else if (body.branch !== undefined) {
+        if (typeof body.branch !== 'string' && typeof body.branch !== 'boolean') return fail(400, 'INVALID_BODY', 'branch must be a string or boolean');
+        move = { branch: body.branch };
+      } else {
+        move = { next: true };
+      }
+      return json(200, await engine.move(id, move, { input, actor: by }));
+    } catch (error) {
+      if (isWorkflowError(error)) {
+        const status = STATUS_BY_CODE[error.code] ?? 500;
+        if (status >= 500) (onError ?? ((e) => console.error('vise-workflow-engine: request failed', e)))(error);
+        return fail(status, error.code, error.message, error.code === 'ACTION_FAILED' ? undefined : error.details);
+      }
+      (onError ?? ((e) => console.error('vise-workflow-engine: request failed', e)))(error);
       return fail(500, 'INTERNAL', 'Internal error');
     }
   }

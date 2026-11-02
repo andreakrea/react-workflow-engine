@@ -152,6 +152,18 @@ Hook failures never abort a move: they're logged and emitted as `hookError`.
 
 With `knexStores` every `start` / `move` / `emit` runs in one transaction and the subject row is locked (`SELECT … FOR UPDATE` on Postgres/MySQL), so concurrent moves on the same subject are serialised and a failing action rolls the move back. Your handlers get the transaction as `tx` — write through it to be part of the same commit. Pass `transaction: false` to opt out.
 
+### Where is it, and how did it get there?
+
+```ts
+await engine.get(ticketId);
+// { subject, node: { id, type, label } | null, next: [...], status: 'not_started' | 'waiting' | 'completed' }
+
+await engine.start(ticketId, workflowId, { actor: user.id });   // actor is stored in history and passed to handlers
+await engine.history(ticketId);   // [{ from, to, branch, actor, at }, ...] oldest first
+```
+
+History needs a store: `knexStores(knex, { subjects, history: true })` (table from migration 002 or `createWorkflowHistoryTable(knex)`), or `memoryHistoryStore()`. It is written in the same transaction as the move. Automatic steps (actions that return a move) are recorded with `actor: null`.
+
 ### Events
 
 ```ts
@@ -214,6 +226,28 @@ interface SubjectStore  { get(id, tx?); setState(id, { workflowId, nodeId, nodeT
 | errors | `{ error: { code, message, details? } }` with 400 / 403 / 404 / 405 / 500 |
 
 Options: `store` (required), `validate`, `scope(req, ctx)`, `authorize(req, action, ctx)`, `createdBy(req, ctx)`, `basePath`, `onError`. Internal error messages are never sent to clients; `created_by` is never read from the body.
+
+### Subjects: start, move, read, history
+
+`createSubjectHandler({ engine })` gives your app the routes that drive tickets, so you don't write them by hand:
+
+| Request | Response |
+|---|---|
+| `GET /:id` | `{ subject, node, next, status }` |
+| `GET /:id/history?limit=` | `{ history }` |
+| `POST /:id/start` | body `{ workflowId, input? }` → `{ subject, node, path, status }` |
+| `POST /:id/move` | body `{ next: true }` \| `{ branch }` \| `{ to, force? }`, plus `input?` |
+| `POST /:id/emit` | body `{ trigger, input? }` → `{ fired, failed }` |
+
+Engine errors map to statuses: not found → 404; invalid or ambiguous moves, unstarted subjects, invalid workflows → 409 with `details.allowed`; failed actions → 500. Options: `authorize(req, action, ctx)` (actions `read`, `history`, `start`, `move`, `emit`, and `force` — forced moves are refused unless this allows them), `actor(req, ctx)`, `canAccess(req, subjectId, ctx)` (return false → 404, e.g. other tenants), `basePath`, `onError`.
+
+```ts
+app.use('/api/tickets', requireAuth, toNodeHandler(createSubjectHandler({
+  engine,
+  actor: (_r, { req }) => req.user.id,
+  canAccess: async (_r, id, { req }) => (await db.tickets.find(id))?.orgId === req.user.orgId,
+})));
+```
 
 ```ts
 // Express / Connect / node:http — mounted under a prefix

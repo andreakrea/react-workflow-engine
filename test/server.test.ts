@@ -2,7 +2,7 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createEngine, defineBlocks, memoryStores } from '../src';
-import { createHandler, toNodeHandler } from '../src/server';
+import { createHandler, createSubjectHandler, toNodeHandler } from '../src/server';
 import { activateTestLicense } from './helpers';
 
 beforeAll(() => activateTestLicense());
@@ -122,5 +122,65 @@ describe('toNodeHandler', () => {
     expect(parsed.status).toBe(201);
     const list = await (await fetch(url)).json();
     expect(list.workflows.map((w: { name: string }) => w.name).sort()).toEqual(['Flow', 'Two']);
+  });
+});
+
+describe('createSubjectHandler', () => {
+  const flowBlocks = defineBlocks({
+    start: { kind: 'start', label: 'Start' },
+    approve: { kind: 'decision', label: 'Approve?' },
+    done: { kind: 'end', label: 'Done' },
+    no: { kind: 'end', label: 'Rejected' },
+  });
+  const wf = {
+    id: 1, name: 'f', hooks: [],
+    nodes: [
+      { id: 'a', position: { x: 0, y: 0 }, data: { type: 'start' } },
+      { id: 'b', position: { x: 0, y: 0 }, data: { type: 'approve' } },
+      { id: 'c', position: { x: 0, y: 0 }, data: { type: 'done' } },
+      { id: 'd', position: { x: 0, y: 0 }, data: { type: 'no' } },
+    ],
+    edges: [{ id: '1', source: 'a', target: 'b' }, { id: '2', source: 'b', target: 'c', sourceHandle: 'yes' }, { id: '3', source: 'b', target: 'd', sourceHandle: 'no' }],
+  };
+  const make = () => {
+    const engine = createEngine({ ...memoryStores({ workflows: [wf], subjects: [{ id: 7 }, { id: 8 }] }), blocks: flowBlocks, logger: {}, actions: { start: () => ({ next: true }) } });
+    const handler = createSubjectHandler<{ user: string }>({
+      engine,
+      basePath: '/api/tickets',
+      actor: (_r, ctx) => ctx.user,
+      canAccess: (_r, id) => id !== '8',
+      authorize: (_r, action, ctx) => action !== 'force' || ctx.user === 'admin',
+      onError: () => {},
+    });
+    const call = (method: string, path: string, body?: unknown, user = 'alice') =>
+      handler(new Request(`http://x/api/tickets${path}`, { method, body: body === undefined ? undefined : JSON.stringify(body) }), { user });
+    return { call };
+  };
+
+  it('starts, moves, reads and lists history', async () => {
+    const { call } = make();
+    expect((await (await call('GET', '/7')).json()).status).toBe('not_started');
+    const started = await (await call('POST', '/7/start', { workflowId: 1 })).json();
+    expect(started).toMatchObject({ node: { id: 'b' }, path: ['a', 'b'], status: 'waiting' });
+    const view = await (await call('GET', '/7')).json();
+    expect(view.next.map((n: { branch: string }) => n.branch)).toEqual(['yes', 'no']);
+    expect((await (await call('POST', '/7/move', { branch: 'yes' }, 'bob')).json()).status).toBe('completed');
+    const { history } = await (await call('GET', '/7/history')).json();
+    expect(history.map((h: { to: string; actor: string | null }) => `${h.to}:${h.actor}`)).toEqual(['a:alice', 'b:null', 'c:bob']);
+  });
+
+  it('maps engine errors to HTTP statuses and guards force / access', async () => {
+    const { call } = make();
+    expect((await call('POST', '/7/move', { next: true })).status).toBe(409);
+    await call('POST', '/7/start', { workflowId: 1 });
+    const bad = await call('POST', '/7/move', { branch: 'maybe' });
+    expect(bad.status).toBe(409);
+    expect((await bad.json()).error).toMatchObject({ code: 'INVALID_TRANSITION', details: { allowed: ['yes → c', 'no → d'] } });
+    expect((await call('POST', '/7/move', { branch: 'yes', next: true })).status).toBe(400);
+    expect((await call('POST', '/7/move', { to: 'd', force: true })).status).toBe(403);
+    expect((await call('POST', '/7/move', { to: 'd', force: true }, 'admin')).status).toBe(200);
+    expect((await call('GET', '/8')).status).toBe(404);
+    expect((await call('GET', '/99')).status).toBe(404);
+    expect((await call('DELETE', '/7')).status).toBe(405);
   });
 });

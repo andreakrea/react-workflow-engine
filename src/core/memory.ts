@@ -1,5 +1,5 @@
 import { NO_LICENSE } from './license';
-import type { Scope, Subject, SubjectStore, Workflow, WorkflowId, WorkflowInput, WorkflowStore } from './types';
+import type { HistoryEntry, HistoryStore, Scope, Subject, SubjectStore, Workflow, WorkflowId, WorkflowInput, WorkflowStore } from './types';
 
 const clone = <T>(x: T): T => (typeof structuredClone === 'function' ? structuredClone(x) : JSON.parse(JSON.stringify(x)));
 const inScope = (row: Record<string, unknown>, scope?: Scope) => !scope || Object.entries(scope).every(([k, v]) => row[k] === v);
@@ -84,6 +84,21 @@ export function memorySubjectStore<S extends Subject = Subject>(initial: Array<P
   };
 }
 
+export function memoryHistoryStore(): HistoryStore & { readonly [NO_LICENSE]: true } {
+  const rows: HistoryEntry[] = [];
+  let id = 1;
+  return {
+    [NO_LICENSE]: true,
+    async append(entry) {
+      rows.push({ ...entry, id: id++ });
+    },
+    async list(subjectId, opts = {}) {
+      const all = rows.filter((r) => String(r.subjectId) === String(subjectId));
+      return clone(opts.limit ? all.slice(-opts.limit) : all);
+    },
+  };
+}
+
 export function memoryStores<S extends Subject = Subject>(opts: { workflows?: Workflow[]; subjects?: Array<Partial<S> & { id: S['id'] }> } = {}) {
-  return { workflows: memoryWorkflowStore(opts.workflows), subjects: memorySubjectStore<S>(opts.subjects) };
+  return { workflows: memoryWorkflowStore(opts.workflows), subjects: memorySubjectStore<S>(opts.subjects), history: memoryHistoryStore() };
 }
