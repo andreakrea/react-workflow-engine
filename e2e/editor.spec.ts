@@ -90,7 +90,8 @@ test('runs tickets through the real engine, including a timed wait', async ({ pa
   await row.getByRole('button', { name: 'History' }).click();
   await expect(row.locator('.sim__history li').first()).toContainText('Started at Start');
   // Low-priority tickets wait 10 s for a reply, then resolve on their own.
-  const waiting = page.locator('.sim__row', { hasText: 'Wait for reply' });
+  // Match the ticket's current position only, not text inside an opened history.
+  const waiting = page.locator('.sim__row-sub', { hasText: 'Wait for reply' });
   if ((await waiting.count()) > 0) await expect(waiting).toHaveCount(0, { timeout: 15_000 });
 });
 
